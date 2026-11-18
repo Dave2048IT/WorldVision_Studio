@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#090b18">
+    <meta name="description"
+      content="WorldVision Studio v3.16 — a local family song contest and voting show with F-ZERO-inspired autoplay music.">
+    <title>WorldVision Studio v3.16</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brandmark">W</div>
+          <div class="brandname"> WORLDVISION <small>FAMILY SHOW STUDIO</small>
+          </div>
+        </div>
+        <div class="navlabel">SHOW MANAGEMENT</div>
+        <nav class="nav" id="mainNav">
+          <button data-view="home" class="active">
+            <span class="ico">◈</span> My Shows </button>
+          <button data-view="participants">
+            <span class="ico">◎</span> Participants </button>
+          <button data-view="juries">
+            <span class="ico">✦</span> Juries &amp; Points </button>
+          <button data-view="televote">
+            <span class="ico">◉</span> Televote </button>
+          <button data-view="settings">
+            <span class="ico">⚙</span> Settings </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="active-show-card">
+            <small>CURRENT SHOW</small>
+            <strong id="sideShowName">No show selected</strong>
+            <div class="storage">
+              <span class="dot"></span> Saved locally
+            </div>
+          </div>
+          <div class="storage"> ◆ <span id="storageStatus">Autosave enabled</span>
+          </div>
+          <div class="footer-note">
+            WORLDVISION STUDIO · LOCAL EDITION
+            <span class="footer-credit">Developed by: Dave2048IT</span>
+          </div>
+        </div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow" id="pageEyebrow"> YOUR CONTEST. YOUR RULES. </div>
+            <h1 id="pageTitle">My Shows</h1>
+          </div>
+          <div class="top-actions" id="topActions">
+            <button class="btn" data-action="import-trigger"> ⇧ Import </button>
+            <button class="btn" data-action="export"> ⇩ Backup </button>
+            <button class="btn primary" data-action="new-show"> ＋ New Show </button>
+          </div>
+        </header>
+        <section class="content" id="viewRoot"></section>
+      </main>
+    </div>
+    <input type="file" id="importFile" accept=".json,application/json" class="hidden">
+    <div class="toast" id="toast"></div>
+    <section class="presentation" id="presentation" aria-hidden="true">
+	  <!-- <div class="phantom-vortex"></div> -->
+      <div class="phantom-cube-stage" aria-hidden="true">
+        <div class="phantom-cube-flight">
+          <div class="phantom-cube">
+            <div class="phantom-cube-face front"></div>
+            <div class="phantom-cube-face back"></div>
+            <div class="phantom-cube-face right"></div>
+            <div class="phantom-cube-face left"></div>
+            <div class="phantom-cube-face top"></div>
+            <div class="phantom-cube-face bottom"></div>
+          </div>
+        </div>
+      </div>
+    
+      <div class="pres-shell">
+        <div class="pres-top">
+          <div>
+            <div class="pres-brand"> WORLDVISION · LIVE VOTING </div>
+            <div class="pres-progress">
+              <span id="presProgress"></span>
+            </div>
+          </div>
+          <div class="row wrap">
+            <button class="btn" data-action="pres-fullscreen"> ⛶ Fullscreen </button>
+            <button class="btn" data-action="close-pres"> ✕ Close <span class="smallmuted">[ESC]</span>
+            </button>
+          </div>
+        </div>
+        <div class="pres-content">
+          <div>
+            <div class="pres-jury-counter" id="presJuryCounter" hidden aria-live="off"></div>
+            <div class="pres-kicker" id="presKicker"> THE VOTING IS ABOUT TO BEGIN </div>
+            <div class="pres-title" id="presTitle"> It's time to vote. </div>
+            <div class="pres-highlight" id="presHighlight"> Welcome to WorldVision </div>
+            <div class="pres-sub" id="presSub"> Press Next to start the show. </div>
+            <div class="pres-host-choice" id="presHostChoice" hidden></div>
+          </div>
+          <div class="pres-score-layout">
+            <div class="pres-sprint-area" id="presSprintArea" aria-label="Sprintstrecke">
+              <div class="pres-sprint-track" id="presSprintTrack">
+                <div class="pres-sprint-lane-markings" aria-hidden="true"></div>
+                <div class="pres-sprint-finish-line" aria-hidden="true"></div>
+                <div class="pres-sprint-finish" id="presSprintFinish" aria-hidden="true">🏁</div>
+                <div class="pres-sprint-flags" id="presSprintFlags"></div>
+                <div class="pres-sprint-start-line" aria-hidden="true"></div>
+                <div class="pres-sprint-start-arrow" aria-hidden="true">↑</div>
+              </div>
+            </div>
+            <div class="pres-score">
+              <h3 id="presScoreTitle"> Current Standings </h3>
+              <div class="pres-rank-list" id="presRanks"></div>
+            </div>
+          </div>
+        </div>
+        <div class="pres-controls">
+          <button class="btn" data-action="pres-reset" title="Home"> ↺ </button>
+          <button class="btn" data-action="pres-prev" title="Left Arrow"> ◀ </button>
+          <button class="btn primary" data-action="pres-next" title="Right Arrow"> Next ▶ </button>
+          <button class="btn" data-action="pres-pause" title="Space"> Ⅱ </button>
+          <button class="btn" data-action="pres-slower" title="Down Arrow"> − </button>
+          <span class="pres-count" id="presCount"> Ready </span>
+          <button class="btn" data-action="pres-faster" title="Up Arrow"> ＋ </button>
+          <button class="btn" data-action="music-toggle" aria-pressed="false" title="Mute all music and sound effects">
+            ♫ Mute </button>
+        </div>
+      </div>
+    </section>
+    <!-- Hidden audio players -->
+    <audio id="bgMusic" preload="auto"></audio>
+    <audio id="jingleMusic" preload="auto"></audio>
+    <audio id="auxMusic" preload="auto"></audio>
+    <audio id="entryMusic" preload="auto"></audio>
+    <!-- Hidden SoundCloud players -->
+    <iframe id="soundcloudPlayerA" src="about:blank" allow="autoplay" title="Hidden SoundCloud Player A"></iframe>
+    <iframe id="soundcloudPlayerB" src="about:blank" allow="autoplay" title="Hidden SoundCloud Player B"></iframe>
+    <!-- External APIs -->
+    <script src="https://w.soundcloud.com/player/api.js"></script>
+    <!-- Main application -->
+    <script src="script.js"></script>
+  </body>
+
+</html>
