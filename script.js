@@ -228,7 +228,7 @@ function getTrackSource(trackName, variant = 'normal') {
   return entry?.[variant] || null;
 }
 
-const getCurrentSeasonalFinalTrack = () =>
+let getCurrentSeasonalFinalTrack = () =>
   SEASONAL_FINAL_TRACKS[Math.floor((new Date().getMonth() + 10) % 12 / 3)];
 
 function musicDebug(event, details = {}) {
@@ -1033,7 +1033,14 @@ function tryStartEntryMusic() {
   if (!show?.settings?.musicEnabled || entryMusicStoppedForPresentation || pres) return;
   if (!entryAudio.src) entryAudio.src = JINGLE_TRACKS.entry;
   entryAudio.loop = false;
-  setHtmlAudioVolume(entryAudio, AUDIO_VOLUME.background);
+  
+  if (entryAudio._wvFadeInTimer !== null && entryAudio._wvFadeInTimer !== undefined) {
+    clearInterval(entryAudio._wvFadeInTimer);
+  }
+  entryAudio._wvFadeInTimer = null;
+  entryAudio._wvFadeIn = null;
+  entryAudio.volume = 0;
+
   const token = ++entryMusicAttemptToken;
   const playback = entryAudio.play();
   if (!playback || typeof playback.then !== 'function') {
@@ -1046,6 +1053,19 @@ function tryStartEntryMusic() {
       return;
     }
     entryMusicPending = false;
+
+    entryAudio._wvFadeIn = {
+      baseVolume: AUDIO_VOLUME.background,
+      startedAt: performance.now(),
+      durationMs: 3000
+    };
+
+    const tickFadeIn = () => setHtmlAudioVolume(entryAudio, AUDIO_VOLUME.background);
+    tickFadeIn();
+
+    if (entryAudio._wvFadeIn) {
+      entryAudio._wvFadeInTimer = setInterval(tickFadeIn, 25);
+    }
   }).catch(error => {
     if (token !== entryMusicAttemptToken) return;
     entryMusicPending = true;
@@ -1248,6 +1268,79 @@ const DEFAULT_COUNTRIES = [['DE', 'Germany'], ['FR', 'France'], ['IT', 'Italy'],
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const clone = o => JSON.parse(JSON.stringify(o));
 
+const COUNTRY_DATA_URL =
+  'https://raw.githubusercontent.com/mledoze/countries/master/countries.json';
+
+let countryLookupPromise = null;
+
+function normalizeCountryName(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function buildCountryLookup(countries) {
+  const byCode = new Map();
+  const byName = new Map();
+
+  countries.forEach(country => {
+    const code = String(country.cca2 || '').toUpperCase();
+    if (!/^[A-Z]{2}$/.test(code)) return;
+
+    const commonName = country.name?.common;
+    if (!commonName) return;
+
+    byCode.set(code, {
+      code,
+      name: commonName
+    });
+
+    const names = [
+      commonName,
+      country.name?.official,
+      country.translations?.deu?.common,
+      ...(country.altSpellings || [])
+    ];
+
+    names.filter(Boolean).forEach(name => {
+      byName.set(normalizeCountryName(name), code);
+    });
+  });
+
+  return { byCode, byName };
+}
+
+function getCountryLookup() {
+  if (!countryLookupPromise) {
+    countryLookupPromise = fetch(COUNTRY_DATA_URL)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Country data could not be loaded.');
+        }
+        return response.json();
+      })
+      .then(countries => buildCountryLookup(countries))
+      .catch(error => {
+        console.warn('Using fallback country data.', error);
+
+        return buildCountryLookup(
+          DEFAULT_COUNTRIES.map(([cca2, name]) => ({
+            cca2,
+            name: {
+              common: name,
+              official: name
+            }
+          }))
+        );
+      });
+  }
+
+  return countryLookupPromise;
+}
+
 function toISOCode(value) {
   const v = String(value ?? '').trim();
   if (/^[a-z]{2}$/i.test(v)) return v.toUpperCase();
@@ -1289,13 +1382,14 @@ function juryFlagHTML(value) {
 }
 
 function blankShow(name = 'WorldVision 2026') {
-  return { id: uid(), name, year: new Date().getFullYear(), host: '', participants: [], juries: [], settings: { televoteEnabled: true, televoteOrder: 'jury', excludeSelf: true, points: POINTS.slice(), pointPreset: 'esc', musicEnabled: false }, televote: {}, musicName: '', musicAssetId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  return { id: uid(), name, year: new Date().getFullYear(), host: '', participants: [], juries: [], settings: { televoteEnabled: false, televoteOrder: 'jury', excludeSelf: true, points: POINTS.slice(), pointPreset: 'esc', musicEnabled: false }, televote: {}, musicName: '', musicAssetId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 }
 
 function initialDB() {
   const s = blankShow('My first WorldVision show');
   return { version: 1, musicSettingMigratedV313: true, activeShowId: s.id, shows: [s] };
 }
+let juryImportPreview = null, juryImportText = '';
 let db = loadDB(), view = 'home', pres = null, presIndex = 0, presTimer = null, presRevealTimer = null, presRevealPending = false, presRevealRemaining = 0, presRevealStartedAt = 0, presPostAnimationTimer = null, presPostAnimationPending = false, presPostAnimationRemaining = 0, presPostAnimationStartedAt = 0, presSpeed = 3000, presPaused = true, toastTimer = null, spoilersRevealed = false, jurySpoilersRevealed = false;
 const root = document.getElementById('viewRoot');
 
@@ -1518,13 +1612,9 @@ function renderPresSprint(totals, finished = false) {
   });
 
   existing.forEach(element => element.remove());
-
   track.classList.toggle('is-finished', Boolean(finished));
-
   const finishIcon = document.getElementById('presSprintFinish');
-  if (finishIcon) {
-    finishIcon.setAttribute('aria-hidden', String(!finished));
-  }
+  if (finishIcon) finishIcon.setAttribute('aria-hidden', String(!finished));
 }
 
 function juryComplete(j, s = activeShow()) {
@@ -1570,6 +1660,178 @@ function renderParticipants(s) {
   root.innerHTML = `<div class="panel"><div class="panel-head"><div><h2>Participants & Entries</h2><div class="sub">Each country or team enters with its own song. Add the ISO country code, artist and song title.</div></div><div class="row wrap"><button class="btn small" data-action="add-template">＋ Country template</button><button class="btn primary" data-action="add-participant">＋ Add participant</button></div></div>${s.participants.length ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Flag code</th><th>Country / Team</th><th>Artist</th><th>Song</th><th>Running order</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty"><div class="big">◎</div><h3>Your line-up is empty</h3><p>Add your family members, countries or custom teams as participants.</p><button class="btn primary" data-action="add-template">Add country template</button></div>'}<div class="row between" style="margin-top:15px"><span class="smallmuted">${s.participants.length} participants · Sort by running order</span><button class="btn small" data-action="sort-participants">Sort by running order</button></div></div><div class="panel"><div class="panel-head"><div><h2>Quick Start</h2><div class="sub">You can also use custom names such as “Team Mom”.</div></div></div><div class="help">Enter a two-letter ISO 3166-1 alpha-2 country code (for example DE, SE or FI). Flags are loaded from FlagCDN and keep their original aspect ratio. Custom teams can leave the code blank.</div></div>`;
 }
 
+function normalizeJuryCountryName(value) {
+  const raw = String(value || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const key = raw.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+  const aliases = {
+    'usa': 'united states',
+    'us': 'united states',
+    'united states of america': 'united states',
+    'uk': 'united kingdom',
+    'great britain': 'united kingdom',
+    'the netherlands': 'netherlands',
+    'czech republic': 'czechia',
+    'turkiye': 'turkey',
+    'republic of korea': 'south korea',
+    'korea republic of': 'south korea',
+    'korea south': 'south korea'
+  };
+  return aliases[key] || key;
+}
+
+function stripWhatsAppPrefix(line) {
+  return String(line || '').replace(/^\s*(?:\[[^\]]+\]\s*)?\d{1,2}[./-]\d{1,2}[./-]\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:[-–]\s*)?(?:[^:]+:\s*)?/, '').trim();
+}
+
+function parseJuryImportText(rawText, s = activeShow()) {
+  const text = String(rawText || '').replace(/\r/g, '');
+  const marker = /^.*?My Country is\s*:\s*(.*?)\s*$/gim;
+  const starts = [];
+  let match;
+  while ((match = marker.exec(text)) !== null) {
+    const lineStart = text.lastIndexOf('\n', match.index) + 1;
+    starts.push({ index: lineStart, name: match[1].trim() });
+  }
+  if (!starts.length) return { sourceText: text, submissions: [], errors: ['No "My Country is:" marker was found.'], warnings: [] };
+
+  const participantByName = new Map();
+  (s?.participants || []).forEach(participant => {
+    const key = normalizeJuryCountryName(participant.name);
+    if (key && !participantByName.has(key)) participantByName.set(key, participant);
+  });
+
+  const seenJuries = new Set();
+  const submissions = [];
+  starts.forEach((start, index) => {
+    const end = starts[index + 1]?.index ?? text.length;
+    const section = text.slice(start.index, end);
+    const lines = section.split('\n').map(stripWhatsAppPrefix).filter(Boolean);
+    const juryName = start.name;
+    const errors = [];
+    const warnings = [];
+    const juryKey = normalizeJuryCountryName(juryName);
+    const juryParticipant = participantByName.get(juryKey);
+    if (!juryName) errors.push('Jury country is empty.');
+    if (!juryParticipant) errors.push(`Jury country "${juryName || '(empty)'}" is not in the participant list.`);
+    if (juryKey && seenJuries.has(juryKey)) errors.push('This jury appears more than once in the pasted text.');
+    if (juryKey) seenJuries.add(juryKey);
+
+    const existingJury = (s?.juries || []).find(j => normalizeJuryCountryName(j.name) === juryKey);
+    if (existingJury && Object.values(existingJury.votes || {}).some(value => Number(value) > 0)) {
+      errors.push('A jury with this name already has votes. Nothing will be overwritten.');
+    }
+
+    const ranking = [];
+    const seenRanks = new Set();
+    const seenCountries = new Set();
+    lines.forEach(line => {
+      const cleaned = line.replace(/^\s*My Country is\s*:\s*.*$/i, '').trim();
+      if (!cleaned) return;
+      const rankMatch = cleaned.match(/^(\d{1,2})(?:st|nd|rd|th)?\s*[:.)-]\s*(.+?)\s*(?:→|➜|⇒|->|=>)\s*(\d+)\s*P(?:oints?)?\.?\s*$/i);
+      if (!rankMatch) {
+        if (/^\d{1,2}(?:st|nd|rd|th)?\s*[:.)-]/i.test(cleaned)) errors.push(`Malformed ranking line: ${cleaned}`);
+        return;
+      }
+      const rank = Number(rankMatch[1]);
+      const countryName = rankMatch[2].trim();
+      const sourcePoints = Number(rankMatch[3]);
+      if (!Number.isInteger(rank) || rank < 1) errors.push(`Invalid ranking position: ${rankMatch[1]}.`);
+      if (seenRanks.has(rank)) errors.push(`Ranking position ${rank} appears more than once.`);
+      seenRanks.add(rank);
+      const countryKey = normalizeJuryCountryName(countryName);
+      if (seenCountries.has(countryKey)) errors.push(`"${countryName}" appears more than once in this ranking.`);
+      seenCountries.add(countryKey);
+      const participant = participantByName.get(countryKey);
+      if (!participant) errors.push(`Rank ${rank}: "${countryName}" is not in the participant list.`);
+      if (s?.settings?.excludeSelf && participant && juryParticipant && participant.id === juryParticipant.id) {
+        errors.push(`Rank ${rank}: a jury cannot award points to its own entry.`);
+      }
+      ranking.push({ rank, countryName, sourcePoints, participantId: participant?.id || null, participantName: participant?.name || countryName });
+    });
+
+    if (!ranking.length) errors.push('No ranking lines were recognized.');
+    ranking.sort((a, b) => a.rank - b.rank);
+    ranking.forEach((entry, i) => {
+      if (entry.rank !== i + 1) errors.push(`Ranking is incomplete: expected position ${i + 1}, found ${entry.rank}.`);
+    });
+
+    const juryForPoints = { ...(existingJury || {}), name: juryParticipant?.name || juryName };
+    const pointValues = juryParticipant ? juryPointValues(juryForPoints, s) : pointsList(s);
+    if (ranking.length > pointValues.length) {
+      warnings.push(`The message contains ${ranking.length} ranked countries, but the active scheme has ${pointValues.length} point values. Positions after ${pointValues.length} will be ignored.`);
+    }
+    ranking.forEach((entry, i) => {
+      entry.assignedPoints = pointValues[i] ?? null;
+      if (entry.assignedPoints !== null && entry.sourcePoints !== entry.assignedPoints) {
+        warnings.push(`Rank ${entry.rank}: source says ${entry.sourcePoints} P., active scoring assigns ${entry.assignedPoints} P.`);
+      }
+    });
+    if (ranking.length && ranking.length < pointValues.length) {
+      warnings.push(`Only ${ranking.length} of ${pointValues.length} available point values are present. The jury will remain incomplete.`);
+    }
+
+    submissions.push({ juryName, juryParticipantId: juryParticipant?.id || null, existingJuryId: existingJury?.id || null, ranking, errors, warnings });
+  });
+  return {
+    sourceText: text,
+    submissions,
+    errors: submissions.flatMap(item => item.errors.map(error => `${item.juryName || 'Unknown jury'}: ${error}`)),
+    warnings: submissions.flatMap(item => item.warnings.map(warning => `${item.juryName}: ${warning}`))
+  };
+}
+
+function renderJuryImportPreview() {
+  if (!juryImportPreview) return '';
+  const result = juryImportPreview;
+  const rows = result.submissions.map(item => {
+    const state = item.errors.length ? '<span class="pill warn">Needs correction</span>' : '<span class="pill ok">Ready</span>';
+    const ranking = item.ranking.map(entry => `<div class="jury-import-rank"><span>${entry.rank}.</span><span>${safe(entry.participantName)}</span><b>${entry.assignedPoints ?? '—'} P.</b></div>`).join('');
+    const messages = [
+      ...item.errors.map(message => `<div class="jury-import-message error">${safe(message)}</div>`),
+      ...item.warnings.map(message => `<div class="jury-import-message warning">${safe(message)}</div>`)
+    ].join('');
+    return `<div class="jury-import-preview-card"><div class="row between"><b>${safe(item.juryName)}</b>${state}</div>${messages}${ranking || '<div class="smallmuted">No ranking recognized.</div>'}</div>`;
+  }).join('');
+  const readyCount = result.submissions.filter(item => !item.errors.length).length;
+  return `<div class="jury-import-preview"><div class="row between"><b>Import preview</b><span class="smallmuted">${readyCount}/${result.submissions.length} ready</span></div>${rows}<div class="row wrap" style="margin-top:12px"><button class="btn primary" data-action="jury-import-apply" ${readyCount && !result.errors.length ? '' : 'disabled'}>Import ${readyCount} ${readyCount === 1 ? 'jury' : 'juries'}</button><button class="btn small" data-action="jury-import-clear">Clear preview</button></div></div>`;
+}
+
+function applyJuryImport() {
+  const s = activeShow();
+  if (s && juryImportPreview?.sourceText !== undefined) juryImportPreview = parseJuryImportText(juryImportPreview.sourceText, s);
+  if (!s || !juryImportPreview) {
+    toast('There is no jury import preview to apply.');
+    return;
+  }
+  if (juryImportPreview.errors.length) {
+    render();
+    toast('Correct all import errors before importing.');
+    return;
+  }
+  let imported = 0;
+  juryImportPreview.submissions.forEach(item => {
+    let jury = item.existingJuryId ? s.juries.find(entry => entry.id === item.existingJuryId) : null;
+    if (!jury) {
+      const participant = s.participants.find(entry => entry.id === item.juryParticipantId);
+      jury = { id: uid(), flag: participant?.flag || '🎤', name: participant?.name || item.juryName, votes: {} };
+      s.juries.push(jury);
+    }
+    const juryParticipant = s.participants.find(entry => entry.id === item.juryParticipantId);
+    if (juryParticipant) jury.name = juryParticipant.name;
+    const votes = {};
+    item.ranking.forEach(entry => {
+      if (entry.participantId && entry.assignedPoints !== null) votes[entry.participantId] = entry.assignedPoints;
+    });
+    jury.votes = votes;
+    imported++;
+  });
+  juryImportPreview = null;
+  juryImportText = '';
+  saveDB();
+  render();
+  toast(`${imported} ${imported === 1 ? 'jury' : 'juries'} imported.`);
+}
+
 function renderJuries(s) {
   const juryCards = s.juries.map((j, idx) => {
     const completed = juryComplete(j, s), points = juryPointValues(j, s);
@@ -1583,7 +1845,8 @@ function renderJuries(s) {
   const scoringHelp = s.settings?.pointPreset === 'fzero44'
     ? 'The F-Zero GX + Extra scale awards 44 descending point values from 100 to 1. Only the highest values needed for the eligible participants are shown for each jury.'
     : 'The standard scoring system follows the ESC format: 12, 10, 8, 7, 6, 5, 4, 3, 2 and 1 point.';
-  root.innerHTML = `<div class="grid2"><div class="panel"><div class="panel-head"><div><h2>Jury Management</h2><div class="sub">Who awards the points? Each jury can award every point value once.</div></div><button class="btn primary" data-action="add-jury">＋ Add jury</button></div><div class="row wrap"><button class="btn small" data-action="copy-juries">Copy participants as juries</button><button class="btn small" data-action="shuffle-juries">Shuffle order</button><button class="btn small" data-action="randomize-jury">Fill random votes</button><button class="btn small danger" data-action="clear-juries">Clear all jury points</button></div><hr class="rule"><div class="stack">${juryCards || '<div class="empty"><div class="big">✦</div><h3>No juries yet</h3><p>Add juries manually or copy your participants as juries.</p></div>'}</div></div><div class="panel"><div class="panel-head"><div><h2>Overall Jury Score</h2><div class="sub">All jury points entered so far, even if some juries are not complete yet.</div></div><div class="row wrap"><span class="pill ${allJuriesComplete(s) ? 'ok' : 'warn'}">${s.juries.filter(j => juryComplete(j, s)).length}/${s.juries.length} complete</span>${jurySpoilersRevealed ? '' : `<button class="btn small" data-action="reveal-jury-spoilers">Reveal Spoilers</button>`}</div></div>${jurySpoilersRevealed ? scoreboardHTML(s, 'jury') : '<div class="empty"><div class="big">◉</div><h3>Overall Jury Score is hidden</h3><p>Confirm to reveal the jury results.</p></div>'}<hr class="rule"><div class="help">${scoringHelp} Each score can be awarded only once per jury.</div><button class="btn primary" style="width:100%;margin-top:13px" data-action="start-pres">▶ Present jury voting</button></div></div>`;
+  const importer = `<div class="panel jury-import-panel"><div class="panel-head"><div><h2>Jury Importer</h2><div class="sub">Paste one or more Country Ranking List messages, or load a WhatsApp chat export (.txt).</div></div><span class="pill">v3.17</span></div><div class="field"><label for="juryImportText">Jury messages</label><textarea id="juryImportText" rows="10" placeholder="My Country is: Germany\n\n1st : Japan → 12 P.\n2nd : Austria → 10 P.\n3rd : Denmark → 8 P.\n...">${safe(juryImportText)}</textarea></div><div class="row wrap" style="margin-top:12px"><button class="btn primary" data-action="jury-import-preview">Preview import</button><button class="btn" data-action="jury-import-file">Load WhatsApp .txt</button><span class="smallmuted">Recognizes each new submission by “My Country is:”.</span></div>${renderJuryImportPreview()}</div>`;
+  root.innerHTML = `${importer}<div class="grid2"><div class="panel"><div class="panel-head"><div><h2>Jury Management</h2><div class="sub">Who awards the points? Each jury can award every point value once.</div></div><button class="btn primary" data-action="add-jury">＋ Add jury</button></div><div class="row wrap"><button class="btn small" data-action="copy-juries">Copy participants as juries</button><button class="btn small" data-action="shuffle-juries">Shuffle order</button><button class="btn small" data-action="randomize-jury">Fill random votes</button><button class="btn small danger" data-action="clear-juries">Clear all jury points</button></div><hr class="rule"><div class="stack">${juryCards || '<div class="empty"><div class="big">✦</div><h3>No juries yet</h3><p>Add juries manually or copy your participants as juries.</p></div>'}</div></div><div class="panel"><div class="panel-head"><div><h2>Overall Jury Score</h2><div class="sub">All jury points entered so far, even if some juries are not complete yet.</div></div><div class="row wrap"><span class="pill ${allJuriesComplete(s) ? 'ok' : 'warn'}">${s.juries.filter(j => juryComplete(j, s)).length}/${s.juries.length} complete</span>${jurySpoilersRevealed ? '' : `<button class="btn small" data-action="reveal-jury-spoilers">Reveal Spoilers</button>`}</div></div>${jurySpoilersRevealed ? scoreboardHTML(s, 'jury') : '<div class="empty"><div class="big">◉</div><h3>Overall Jury Score is hidden</h3><p>Confirm to reveal the jury results.</p></div>'}<hr class="rule"><div class="help">${scoringHelp} Each score can be awarded only once per jury.</div><button class="btn primary" style="width:100%;margin-top:13px" data-action="start-pres">▶ Present jury voting</button></div></div>`;
 }
 
 function renderTelevote(s) {
@@ -1711,6 +1974,14 @@ function importData(file) {
   r.readAsText(file);
 }
 
+function revealPresentationStart() {
+  const presentation = document.getElementById('presentation');
+
+  if (presentation?.classList.contains('pres-start-covered')) {
+    setTimeout(() => { presentation.classList.remove('pres-start-covered'); }, 1000);
+  }
+}
+
 function startPresentation() {
   entryMusicStoppedForPresentation = true;
   clearPresPostAnimationWait();
@@ -1751,8 +2022,10 @@ function startPresentation() {
   };
   presIndex = 0;
   presPaused = true;
-  document.getElementById('presentation').classList.remove('debug-fast-forward');
-  document.getElementById('presentation').classList.add('on');
+  const presentation = document.getElementById('presentation');
+  presentation.classList.remove('debug-fast-forward');
+  presentation.classList.add('pres-start-covered');
+  presentation.classList.add('on');
   document.getElementById('presentation').setAttribute('aria-hidden', 'false');
   document.body.style.overflow = 'hidden';
   renderPres();
@@ -2202,6 +2475,7 @@ function presNext(fromAuto = false) {
   if (presIndex === 0 && musicSequence.autoplay && !musicSequence.preViewEnded) return;
   if (!fromAuto) stopPresTimer();
   if (presIndex < pres.events.length - 1) {
+    revealPresentationStart();
     presIndex++;
     showCurrentPresStep();
     handleMusicForPresentationStep();
@@ -2528,6 +2802,7 @@ function updatePresPauseButton() {
 
 function startAuto() {
   stopPresTimer();
+  revealPresentationStart(); // NEU!
   presPaused = false;
   const newlyStarted = pres?.debugFastForward ? false : startLiveJuryMusicIfAllowed();
   if (newlyStarted && presIndex > 0) handleMusicForPresentationStep();
@@ -2667,6 +2942,26 @@ function chooseHostForNextEvent(id) {
 function handleAction(a, id) {
   const s = activeShow();
   switch (a) {
+    case 'jury-import-preview': {
+      const input = document.getElementById('juryImportText');
+      juryImportText = input?.value || '';
+      juryImportPreview = parseJuryImportText(juryImportText, s);
+      render();
+      if (!juryImportPreview.submissions.length) toast('No jury submissions found.');
+      else if (juryImportPreview.errors.length) toast('Import preview found errors.');
+      else toast(`${juryImportPreview.submissions.length} jury submissions recognized.`);
+      break;
+    }
+    case 'jury-import-file':
+      document.getElementById('juryImportFile')?.click();
+      break;
+    case 'jury-import-apply':
+      applyJuryImport();
+      break;
+    case 'jury-import-clear':
+      juryImportPreview = null;
+      render();
+      break;
     case 'choose-host':
       chooseHostForNextEvent(id);
       break;
@@ -2687,6 +2982,8 @@ function handleAction(a, id) {
       break;
     case 'new-show':
       {
+        juryImportPreview = null;
+        juryImportText = '';
         const name = prompt('What should your new WorldVision edition be called?', 'WorldVision ' + new Date().getFullYear());
         if (name === null) return;
         resetSpoilerReveals();
@@ -2698,6 +2995,8 @@ function handleAction(a, id) {
         render();
         break;
       } case 'activate':
+      juryImportPreview = null;
+      juryImportText = '';
       resetSpoilerReveals();
       db.activeShowId = id;
       view = 'home';
@@ -2851,6 +3150,8 @@ function handleAction(a, id) {
       break;
     case 'reset-show':
       if (confirm('Completely reset this show?')) {
+        juryImportPreview = null;
+        juryImportText = '';
         resetSpoilerReveals();
         deleteMusicAsset(s.id);
         const n = blankShow(s.name);
@@ -2912,6 +3213,7 @@ function startFireField(presentation) {
     if (!presentation.classList.contains('fire-field')) return;
 
     spawnFireFieldStreaks(presentation);
+    spawnFireFieldSparks(presentation);
   }, 11000);
 }
 
@@ -2933,14 +3235,38 @@ function spawnFireFieldStreaks(presentation) {
 
     streak.style.left = `${Math.random() * 100}%`;
 
-    streak.style.setProperty(
-      '--fire-width',
-      `${2 + Math.random() * 4}px`
-    );
-    streak.style.setProperty(
-      '--fire-height',
-      `${35 + Math.random() * 75}px`
-    );
+    const intensityRoll = Math.random();
+
+    let fireWidth;
+    let fireHeight;
+    let fireOpacity;
+    let fireGlow;
+
+    if (intensityRoll < 0.70) {
+      // 70 % normale Feuerstrahlen
+      fireWidth = 12 + Math.random() * 20;
+      fireHeight = 100 + Math.random() * 200;
+      fireOpacity = 0.8;
+      fireGlow = 1;
+    } else if (intensityRoll < 0.90) {
+      // 20 % besonders intensive Feuerstrahlen
+      fireWidth = 22 + Math.random() * 22;
+      fireHeight = 150 + Math.random() * 200;
+      fireOpacity = 0.95;
+      fireGlow = 1.5;
+    } else {
+      // 10 % extrem intensive Ausbrüche
+      fireWidth = 30 + Math.random() * 25;
+      fireHeight = 180 + Math.random() * 180;
+      fireOpacity = 1;
+      fireGlow = 2;
+    }
+
+    streak.style.setProperty('--fire-width', `${fireWidth}px`);
+    streak.style.setProperty('--fire-height', `${fireHeight}px`);
+    streak.style.setProperty('--fire-opacity', fireOpacity);
+    streak.style.setProperty('--fire-glow', fireGlow);
+    streak.style.setProperty( '--fire-flicker-duration', `${0.25 + Math.random() * 0.45}s` );
     streak.style.setProperty(
       '--fire-duration',
       `${1.2 + Math.random() * 1.3}s`
@@ -2954,6 +3280,50 @@ function spawnFireFieldStreaks(presentation) {
   }, interval);
 }
 
+let fireFieldSparkInterval = null;
+
+function spawnFireFieldSparks(presentation) {
+  if (fireFieldSparkInterval !== null) {
+    clearInterval(fireFieldSparkInterval);
+  }
+
+  const interval = fireFieldIsFinalLap ? 45 : 110;
+
+  fireFieldSparkInterval = setInterval(() => {
+    if (!presentation.classList.contains('fire-field')) {
+      clearInterval(fireFieldSparkInterval);
+      fireFieldSparkInterval = null;
+      return;
+    }
+
+    const spark = document.createElement('div');
+    spark.className = 'fire-spark';
+
+    spark.style.left = `${Math.random() * 100}%`;
+
+    spark.style.setProperty(
+      '--spark-drift',
+      `${(Math.random() - 0.5) * 100}px`
+    );
+
+    spark.style.setProperty(
+      '--spark-size',
+      `${2 + Math.random() * 4}px`
+    );
+
+    spark.style.setProperty(
+      '--spark-duration',
+      `${0.7 + Math.random() * 1.3}s`
+    );
+
+    spark.addEventListener('animationend', () => {
+      spark.remove();
+    }, { once: true });
+
+    presentation.appendChild(spark);
+  }, interval);
+}
+
 function setFireFieldFinalLap(presentation, enabled) {
   if (fireFieldIsFinalLap === enabled) return;
 
@@ -2963,6 +3333,10 @@ function setFireFieldFinalLap(presentation, enabled) {
   // Die 11-Sekunden-Wartezeit wird dabei nicht erneut gestartet.
   if (fireFieldInterval !== null) {
     spawnFireFieldStreaks(presentation);
+  }
+
+  if (fireFieldSparkInterval !== null) {
+    spawnFireFieldSparks(presentation);
   }
 }
 
@@ -2975,6 +3349,11 @@ function stopFireField() {
   if (fireFieldInterval !== null) {
     clearInterval(fireFieldInterval);
     fireFieldInterval = null;
+  }
+
+  if (fireFieldSparkInterval !== null) {
+    clearInterval(fireFieldSparkInterval);
+    fireFieldSparkInterval = null;
   }
 
   fireFieldIsFinalLap = false;
@@ -3044,16 +3423,42 @@ root.addEventListener('input', e => {
     saveDB();
   }
 });
-root.addEventListener('change', e => {
+root.addEventListener('change', async e => {
   const el = e.target, s = activeShow();
   if (!s) return;
   if (el.dataset.edit === 'participant' && el.dataset.key === 'flag') {
     const p = contestant(el.dataset.id, s);
+  
     if (p) {
       p.flag = toISOCode(el.value);
-      el.value = p.flag;
+  
+      const countries = await getCountryLookup();
+      const country = countries.byCode.get(p.flag);
+  
+      if (country) {
+        p.name = country.name;
+      }
+  
       saveDB();
       render();
+    }
+  } else if (
+    el.dataset.edit === 'participant' &&
+    el.dataset.key === 'name'
+  ) {
+    const p = contestant(el.dataset.id, s);
+  
+    if (p) {
+      const countries = await getCountryLookup();
+      const code = countries.byName.get(
+        normalizeCountryName(el.value)
+      );
+  
+      if (code) {
+        p.flag = code;
+        saveDB();
+        render();
+      }
     }
   } else if (el.dataset.juryvote) {
     const j = s.juries.find(x => x.id === el.dataset.juryvote);
@@ -3091,6 +3496,26 @@ root.addEventListener('change', e => {
     s.televote[el.dataset.tv] = Math.max(0, Number(el.value) || 0);
     saveDB();
   }
+});
+document.getElementById('juryImportFile').addEventListener('change', async e => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const content = await file.text();
+    view = 'juries';
+    juryImportText = content;
+    juryImportPreview = parseJuryImportText(content, activeShow());
+    render();
+    const textarea = document.getElementById('juryImportText');
+    if (textarea) textarea.value = content;
+    if (!juryImportPreview.submissions.length) toast('No jury submissions found in this file.');
+    else if (juryImportPreview.errors.length) toast('File loaded; correct the errors shown in the preview.');
+    else toast(`${juryImportPreview.submissions.length} jury submissions recognized.`);
+  } catch (error) {
+    console.error('Could not read jury text file.', error);
+    toast('The selected text file could not be read.');
+  }
+  e.target.value = '';
 });
 document.getElementById('importFile').addEventListener('change', e => {
   if (e.target.files[0]) importData(e.target.files[0]);

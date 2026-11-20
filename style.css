@@ -662,7 +662,7 @@ tr:hover td {
   --pres-theme-secondary: #173f53;
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 5000;
   background: radial-gradient(ellipse at 50% 0,var(--pres-theme-primary) 0,transparent 40%),radial-gradient(ellipse at 20% 100%,var(--pres-theme-secondary) 0,transparent 35%),#070916;
   transition: --pres-theme-primary 1600ms ease, --pres-theme-secondary 1600ms ease;
   color: white;
@@ -687,6 +687,28 @@ tr:hover td {
   grid-template-rows: auto 1fr auto;
   gap: 8px;
 }
+/* Initial black screen before the first presentation step */
+.pres-start-curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 3000ms ease;
+}
+
+#presentation.pres-start-covered .pres-start-curtain {
+  opacity: 1;
+}
+
+/* Keep presentation controls above the black curtain */
+.pres-top > .row.wrap,
+.pres-controls {
+  position: relative;
+  z-index: 9001;
+}
+
 .pres-top {
   display: flex;
   align-items: center;
@@ -1031,7 +1053,7 @@ tr:hover td {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 50;
+  z-index: 9999;
   background: #19213c;
   border: 1px solid #4a567e;
   border-radius: 12px;
@@ -1542,20 +1564,38 @@ tr:hover td {
 @keyframes fireFieldShootUp {
   0% {
     opacity: 0;
-    transform: translateY(0) scaleY(0.5);
+    transform: translate3d(0, 0, 0) scaleY(0.5);
   }
 
-  12% {
-    opacity: 0.85;
+  10% {
+    opacity: 0.9;
   }
 
-  75% {
-    opacity: 0.7;
+  80% {
+    opacity: 0.65;
   }
 
   100% {
     opacity: 0;
-    transform: translateY(-110vh) scaleY(1);
+    transform: translate3d(0, -110vh, 0) scaleY(1);
+  }
+}
+
+@keyframes fireFieldFlicker {
+  0%, 100% {
+    opacity: var(--fire-opacity, 1);
+  }
+
+  35% {
+    opacity: calc(var(--fire-opacity, 1) * 0.75);
+  }
+
+  65% {
+    opacity: calc(var(--fire-opacity, 1) * 1);
+  }
+
+  85% {
+    opacity: calc(var(--fire-opacity, 1) * 0.85);
   }
 }
 
@@ -1571,15 +1611,60 @@ tr:hover td {
 
   background: linear-gradient(
     to top,
-    transparent,
-    #ff5a18 35%,
-    #ffb52e 75%,
-    #fff0a0
+    transparent 0%,
+    #ff3b0a 15%,
+    #ff6418 35%,
+    #ffb52e 65%,
+    #fff4bd 90%,
+    #ffffff 100%
   );
 
-  filter: blur(2px) drop-shadow(0 0 8px #ff641e);
+  opacity: var(--fire-opacity, 1);
 
-  animation: fireFieldShootUp var(--fire-duration) ease-out forwards;
+  filter: blur(3px) drop-shadow(0 0 calc(8px * var(--fire-glow, 1)) #ff641e) drop-shadow(0 0 calc(18px * var(--fire-glow, 1)) #ff3b0a);
+
+  animation: fireFieldShootUp var(--fire-duration) linear forwards, fireFieldFlicker var(--fire-flicker-duration, 0.4s) ease-in-out infinite;
+}
+
+.presentation .fire-spark {
+  position: absolute;
+  bottom: -10px;
+
+  width: var(--spark-size);
+  height: var(--spark-size);
+
+  border-radius: 50%;
+  pointer-events: none;
+
+  background: #fff4bd;
+
+  box-shadow:
+    0 0 5px #fff4bd,
+    0 0 12px #ffb52e,
+    0 0 20px #ff641e;
+
+  animation:
+    fireSparkRise var(--spark-duration) linear forwards;
+}
+
+@keyframes fireSparkRise {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.5);
+  }
+
+  15% {
+    opacity: 1;
+  }
+
+  80% {
+    opacity: 0.8;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--spark-drift), -100vh, 0) scale(0.2);
+  }
 }
 
 /* =========================================
@@ -1612,9 +1697,62 @@ tr:hover td {
     ) bottom / 100% 190px no-repeat;
 
   opacity: 0;
+  z-index: 1;
   transition: opacity 1600ms ease;
 }
 
 .presentation.fire-field::after {
   opacity: 1;
 }
+
+/* =========================================
+   JURY IMPORTER for WhatsApp Text
+========================================= */
+
+.jury-import-panel {
+  border-color: #3c5275;
+  background: linear-gradient(145deg, #18213bfa, #11182cf5);
+}
+.jury-import-panel textarea {
+  min-height: 180px;
+  resize: vertical;
+  line-height: 1.55;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+.jury-import-preview {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.jury-import-preview-card {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #090e1d88;
+}
+.jury-import-rank {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.jury-import-rank > span:first-child {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.jury-import-rank b {
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
+.jury-import-message {
+  font-size: 11px;
+  line-height: 1.45;
+}
+.jury-import-message.error { color: var(--red); }
+.jury-import-message.warning { color: var(--gold); }
