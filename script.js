@@ -1727,9 +1727,9 @@ function parseJuryImportText(rawText, s = activeShow()) {
     lines.forEach(line => {
       const cleaned = line.replace(/^\s*My Country is\s*:\s*.*$/i, '').trim();
       if (!cleaned) return;
-      const rankMatch = cleaned.match(/^(\d{1,2})(?:st|nd|rd|th)?\s*[:.)-]\s*(.+?)\s*(?:→|➜|⇒|->|=>)\s*(\d+)\s*P(?:oints?)?\.?\s*$/i);
+      const rankMatch = cleaned.match(/^(\d+)(?:st|nd|rd|th)?\s*[:.)-]\s*(.+?)\s*(?:→|➜|⇒|->|=>)\s*(\d+)\s*P(?:oints?)?\.?\s*$/i);
       if (!rankMatch) {
-        if (/^\d{1,2}(?:st|nd|rd|th)?\s*[:.)-]/i.test(cleaned)) errors.push(`Malformed ranking line: ${cleaned}`);
+        if (/^\d+(?:st|nd|rd|th)?\s*[:.)-]/i.test(cleaned)) errors.push(`Malformed ranking line: ${cleaned}`);
         return;
       }
       const rank = Number(rankMatch[1]);
@@ -2426,11 +2426,57 @@ function renderPres(phase = 'reveal') {
     const item = contestant(id, s);
     return item ? { p: item, name: item.name, score: Number(score) || 0 } : null;
   }).filter(Boolean));
+  
   const ranks = document.getElementById('presRanks');
+
+  // Alle aktuell sichtbaren grünen Pluspunkte rekonstruieren.
+  const visibleDeltas = new Map();
+
+  for (let i = 0; i <= presIndex; i++) {
+    const event = pres.events[i];
+
+    switch (event.type) {
+      case 'jury-intro':
+      case 'jury-finish':
+      case 'winner':
+      case 'host-announcement':
+      case 'host-choice':
+        // Vorherige Punktephase beenden.
+        visibleDeltas.clear();
+        break;
+
+      case 'jury-point':
+      case 'tv-point':
+        // Bei der Vorschau den aktuellen Punkt noch nicht anzeigen.
+        if (beforeAddition && i === presIndex) break;
+
+        visibleDeltas.set(
+          event.participantId,
+          Number(event.points) || 0
+        );
+        break;
+    }
+  }
+
   ranks.innerHTML = scoreOrder.map(item => {
     const isTarget = scoringEvent && item.p.id === scoringEvent.participantId;
-    return `<div class="pres-rank ${isTarget ? 'is-scoring' : ''}" data-score-id="${safe(item.p.id)}"><span class="pres-rank-position ${presRankClass(item.rank)}">${ordinalHTML(item.rank)}</span><span class="pres-rank-country">${flagImageHTML(item.p.flag, 30)}<span>${safe(item.p.name)}</span></span><b>${isTarget && !beforeAddition ? `<span class="pres-rank-delta">+${scoringEvent.points}</span><span class="pres-rank-total">${item.score}</span>` : `<span class="pres-rank-total">${beforeAddition && isTarget ? item.score : (totals[item.p.id] || 0)}</span>`}</b></div>`;
+    const delta = visibleDeltas.get(item.p.id);
+
+    const displayedTotal =
+      beforeAddition && isTarget
+        ? item.score
+        : (totals[item.p.id] || 0);
+
+    return `<div class="pres-rank ${isTarget ? 'is-scoring' : ''}" data-score-id="${safe(item.p.id)}">
+      <span class="pres-rank-position ${presRankClass(item.rank)}">${ordinalHTML(item.rank)}</span>
+      <span class="pres-rank-country">${flagImageHTML(item.p.flag, 30)}<span>${safe(item.p.name)}</span></span>
+      <b>
+        ${delta !== undefined ? `<span class="pres-rank-delta">+${delta}</span>` : ''}
+        <span class="pres-rank-total">${displayedTotal}</span>
+      </b>
+    </div>`;
   }).join('') || '<div class="smallmuted">No points yet.</div>';
+
   const sprintFinished = ['winner', 'host-announcement', 'host-choice'].includes(ev.type);
   renderPresSprint(orderingTotals, sprintFinished);
   if (scoringEvent) {
