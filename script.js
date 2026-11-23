@@ -79,6 +79,8 @@ const audio = document.getElementById('bgMusic');
 const jingleAudio = document.getElementById('jingleMusic');
 const winnerAudio = document.getElementById('auxMusic');
 const entryAudio = document.getElementById('entryMusic');
+const overtakeAudio = document.getElementById('overtakeAudio');
+
 const ENTRY_LOOP_START_SECONDS = 8.300;
 const ENTRY_LOOP_END_SECONDS = 52.000;
 entryAudio.addEventListener('timeupdate', () => {
@@ -98,7 +100,8 @@ const JINGLE_TRACKS = {
   threeTwoOneGo: 'F-Zero GX - SFX/Three two one go - louder.mp3',
   yeahFinalLap: 'F-Zero GX - SFX/Yeah, the final lap.mp3',
   finish: 'F-Zero GX - SFX/finiiish.mp3',
-  winningRun: 'https://dn721802.ca.archive.org/0/items/f-zero-gx-and-ax-original-soundtracks/CD%202%2F28.%20Hurrah%20for%20the%20Champion%20%28Winning%20Run%29.mp3'
+  winningRun: 'https://dn721802.ca.archive.org/0/items/f-zero-gx-and-ax-original-soundtracks/CD%202%2F28.%20Hurrah%20for%20the%20Champion%20%28Winning%20Run%29.mp3',
+  overtake: 'F-Zero GX - SFX/whoosh L-R.mp3'
 };
 const SEASONAL_FINAL_TRACKS = [
   'green plant',  // 0 = Frühling
@@ -330,6 +333,8 @@ function setGlobalAudioMuted(muted) {
   setHtmlAudioVolume(jingleAudio, AUDIO_VOLUME.effect);
   setHtmlAudioVolume(winnerAudio, AUDIO_VOLUME.winner);
   setHtmlAudioVolume(entryAudio, AUDIO_VOLUME.background);
+  setHtmlAudioVolume(overtakeAudio, AUDIO_VOLUME.effect);
+
   Object.values(soundcloudSlots).forEach(slot => {
     if (slot.widget) {
       try {
@@ -493,7 +498,6 @@ function playHtmlAudio(element, source, options = {}) {
   element.load();
   element.src = source;
   element.currentTime = 0;
-  musicDebug('HTML audio track requested', { player: element.id || 'audio element', source });
   element.dataset.loopStart = String(Number(loop?.start) || 0);
   element.dataset.loopEnd = String(Number(loop?.end) || 0);
   if (fadeInMs > 0) {
@@ -522,6 +526,8 @@ function playHtmlAudio(element, source, options = {}) {
       else console.warn('HTML audio playback was blocked.', error);
     });
   }
+  musicDebug('HTML audio track requested', { player: element.id || 'audio element', source, volume: `${Math.round(element.volume * 100)}%` });
+
   return playRequest || Promise.resolve(true);
 }
 
@@ -2762,6 +2768,30 @@ function revealPresPoints() {
   const previousRank = participantRank(before);
   const nextRank = participantRank(after);
   const nonLeaderOvertake = previousRank > 0 && nextRank > 0 && nextRank < previousRank && nextRank > 1;
+
+  // Whoosh bei tatsächlichen Überholvorgängen ab der zweiten Jury-Runde.
+  const isOvertake =
+    previousRank > 0 &&
+    nextRank > 0 &&
+    nextRank < previousRank;
+
+  const isFirstJuryRound =
+    ev.type === 'jury-point' && ev.juryIndex === 0;
+
+  if (
+    isOvertake &&
+    !isFirstJuryRound &&
+    !pres.debugFastForward
+  ) {
+    const overtakenCount = previousRank - nextRank;
+
+    const whooshVolume = Math.min( 1, 0.50 + (overtakenCount - 1) * 0.04 );
+
+    playHtmlAudio(overtakeAudio, JINGLE_TRACKS.overtake, {
+      baseVolume: whooshVolume
+    });
+  }
+
   if (scoreBox) {
     scoreBox.innerHTML = `<span class="pres-rank-delta">+${ev.points}</span><span class="pres-rank-total">${from}</span>`;
   }
