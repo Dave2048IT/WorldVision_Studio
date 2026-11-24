@@ -1,4 +1,4 @@
-# WorldVision Studio v3.16
+# WorldVision Studio
 
 **Benutzerhandbuch und Entwicklerdokumentation**  
 Dokumentiert für die aufgeteilte Version mit `index.html`, `style.css` und `script.js`.

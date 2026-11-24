@@ -1029,6 +1029,77 @@ tr:hover td {
   background: linear-gradient(120deg,#ee5a9a,#956de9);
   border: 0;
 }
+
+.pres-help-panel {
+  position: absolute;
+  left: 24px;
+  bottom: 88px;
+  z-index: 9002;
+  width: min(440px, calc(100vw - 48px));
+  padding: 16px;
+  border: 1px solid #586087;
+  border-radius: 14px;
+  background: #11152bf5;
+  box-shadow: 0 12px 40px #0009;
+  backdrop-filter: blur(16px);
+}
+
+.pres-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--gold);
+  font-size: 14px;
+}
+
+.pres-help-list {
+  display: grid;
+  gap: 9px;
+}
+
+.pres-help-list > div {
+  display: grid;
+  grid-template-columns: 125px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.pres-help-list > div > strong {
+  color: #f4f5ff;
+}
+
+.pres-help-list > div > span {
+  color: #acb8d6;
+}
+
+.pres-help-list kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid #586087;
+  border-radius: 4px;
+  background: #ffffff0d;
+  color: var(--cyan);
+  font: inherit;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .pres-help-panel {
+    left: 13px;
+    bottom: 90px;
+    width: calc(100vw - 26px);
+  }
+
+  .pres-help-list > div {
+    grid-template-columns: 105px minmax(0, 1fr);
+    gap: 7px;
+  }
+}
+
 .pres-progress {
   height: 4px;
   background: #ffffff18;

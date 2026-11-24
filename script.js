@@ -2036,6 +2036,7 @@ function startPresentation() {
   document.body.style.overflow = 'hidden';
   renderPres();
   handleMusicForPresentationStep();
+  setTimeout(() => alert("Press 'Space' for Autoplay."), 0);
 }
 
 function calculateHostingDecision(s) {
@@ -2356,7 +2357,7 @@ function renderPres(phase = 'reveal') {
         const winnerScore = Number.isFinite(ev.winnerScore) ? ev.winnerScore : standings(s, 'combined')[0]?.score || 0;
         highlight = `${winnerScore} ${winnerScore === 1 ? 'POINT' : 'POINTS'}`;
         sub = winnerNames.length > 1 ? 'A shared first place. Congratulations!' : 'Congratulations!';
-        scoreTitle = 'Final Results';
+        scoreTitle = `Final Results with ${s.participants.length} participants`;
         break;
       }
     case 'host-announcement':
@@ -2393,7 +2394,7 @@ function renderPres(phase = 'reveal') {
             sub = `Hosting rights decided by jury ${ev.resolvedPoint ? `${ev.resolvedPoint}-point` : ''} awards. The shared first place remains unchanged.`;
           }
         }
-        scoreTitle = 'Final Results';
+        scoreTitle = `Final Results with ${s.participants.length} participants`;
         break;
       }
     case 'host-choice':
@@ -3241,6 +3242,19 @@ function handleAction(a, id) {
         toast('Show reset.');
       }
       break;
+    case 'pres-help': {
+      const helpPanel = document.getElementById('presHelpPanel');
+      const helpButton = document.querySelector('[data-action="pres-help"]');
+
+      if (helpPanel) {
+        helpPanel.classList.toggle('hidden');
+        helpButton?.setAttribute(
+          'aria-expanded',
+          String(!helpPanel.classList.contains('hidden'))
+        );
+      }
+      break;
+    }
     case 'close-pres':
       closePres();
       break;
@@ -3600,6 +3614,15 @@ document.getElementById('importFile').addEventListener('change', e => {
 document.addEventListener('keydown', e => {
   if (!pres) return;
   if (e.key === 'Escape') {
+    const helpPanel = document.getElementById('presHelpPanel');
+
+    if (helpPanel && !helpPanel.classList.contains('hidden')) {
+      helpPanel.classList.add('hidden');
+      document.querySelector('[data-action="pres-help"]')
+        ?.setAttribute('aria-expanded', 'false');
+      return;
+    }
+
     closePres();
     return;
   }

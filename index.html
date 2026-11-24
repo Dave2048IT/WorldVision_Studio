@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#090b18">
     <meta name="description"
-      content="WorldVision Studio v3.19 — a local family song contest and voting show with F-ZERO-inspired autoplay music.">
-    <title>WorldVision Studio v3.19</title>
+      content="WorldVision Studio v3.20 — a local family song contest and voting show with F-ZERO-inspired autoplay music.">
+    <title>WorldVision Studio v3.20</title>
     <link rel="stylesheet" href="style.css">
   </head>
 
@@ -123,7 +123,28 @@
             </div>
           </div>
         </div>
+
+        <div class="pres-help-panel hidden" id="presHelpPanel" role="dialog" aria-label="Presentation controls help">
+          <div class="pres-help-header">
+            <strong>Presentation Controls</strong>
+            <button class="btn icon" data-action="pres-help" title="Close help" aria-label="Close help">✕</button>
+          </div>
+
+          <div class="pres-help-list">
+            <div><strong>↺ Reset</strong><span><kbd>Home</kbd> aka <kbd>Pos1</kbd><br> Return to the beginning of the presentation.</span></div>
+            <div><strong>◀ Previous</strong><span><kbd>←</kbd> Go back one presentation step.</span></div>
+            <div><strong>Next ▶</strong><span><kbd>→</kbd> Advance to the next presentation step.</span></div>
+            <div><strong>Ⅱ Play / Pause</strong><span><kbd>Space</kbd> Start or pause automatic playback.</span></div>
+            <div><strong>− Slower</strong><span><kbd>↓</kbd> Slow down automatic playback.</span></div>
+            <div><strong>＋ Faster</strong><span><kbd>↑</kbd> Speed up automatic playback.</span></div>
+            <div><strong>♫ Mute</strong><span>Mute or unmute all music and sound effects.</span></div>
+            <div><strong>Fullscreen</strong><span><kbd>F11</kbd> Toggle browser fullscreen mode.</span></div>
+            <div><strong>✕ Close</strong><span><kbd>Esc</kbd> Exit the presentation.</span></div>
+          </div>
+        </div>
+
         <div class="pres-controls">
+          <button class="btn icon" data-action="pres-help" title="Show control help" aria-label="Show control help" aria-controls="presHelpPanel" aria-expanded="false" > ? </button>
           <button class="btn" data-action="pres-reset" title="Home"> ↺ </button>
           <button class="btn" data-action="pres-prev" title="Left Arrow"> ◀ </button>
           <button class="btn primary" data-action="pres-next" title="Right Arrow"> Next ▶ </button>
