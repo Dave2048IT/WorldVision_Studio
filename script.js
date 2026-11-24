@@ -1989,6 +1989,8 @@ function revealPresentationStart() {
 }
 
 function startPresentation() {
+  if (pres) return;
+
   entryMusicStoppedForPresentation = true;
   clearPresPostAnimationWait();
   const s = activeShow();
@@ -2033,6 +2035,7 @@ function startPresentation() {
   presentation.classList.add('pres-start-covered');
   presentation.classList.add('on');
   document.getElementById('presentation').setAttribute('aria-hidden', 'false');
+  presentation.focus({ preventScroll: true });
   document.body.style.overflow = 'hidden';
   renderPres();
   handleMusicForPresentationStep();
