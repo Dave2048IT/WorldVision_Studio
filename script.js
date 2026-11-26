@@ -55,9 +55,9 @@ const PRESENTATION_TRACK_THEMES = {
   'port town': { primary: '#865039', secondary: '#24596a' }
 };
 const AUDIO_VOLUME = {
-  background: 0.9,
-  effect: 1,
-  winner: 1
+  background: 0.7,
+  winner: 0.5,
+  effect: 1
 };
 const SOUNDCLOUD_PLAYER_VOLUME = 80;
 const JURY_WAIT_MS = 7000;
@@ -80,6 +80,7 @@ const jingleAudio = document.getElementById('jingleMusic');
 const winnerAudio = document.getElementById('auxMusic');
 const entryAudio = document.getElementById('entryMusic');
 const overtakeAudio = document.getElementById('overtakeAudio');
+const ridgeRacerVoiceAudio = document.getElementById('ridgeRacerVoiceAudio');
 
 const ENTRY_LOOP_START_SECONDS = 8.300;
 const ENTRY_LOOP_END_SECONDS = 52.000;
@@ -89,6 +90,13 @@ entryAudio.addEventListener('timeupdate', () => {
     console.log('U-Rays wiederholt. :-)');
   }
 });
+function getSoundCloudVolume(role = 'background') {
+  const audioVolume = role === 'finish-to-go'
+    ? AUDIO_VOLUME.winner
+    : AUDIO_VOLUME.background;
+
+  return Math.round(SOUNDCLOUD_PLAYER_VOLUME * audioVolume);
+}
 let entryMusicPending = false;
 let entryMusicStoppedForPresentation = false;
 let entryMusicAttemptToken = 0;
@@ -97,12 +105,31 @@ const soundcloudPlayerB = document.getElementById('soundcloudPlayerB');
 const JINGLE_TRACKS = {
   entry: 'https://dn721802.ca.archive.org/0/items/f-zero-gx-and-ax-original-soundtracks/CD%202%2F03.%20U-Rays%20%28Tutorial%29.mp3',
   longCoursePreView: 'https://dn801706.us.archive.org/0/items/f-zero-gx-and-ax-original-soundtracks/CD%202%2F20.%20Long%20Pre-View%20%28Course%20View%202%29.mp3',
-  threeTwoOneGo: 'F-Zero GX - SFX/Three two one go - louder.mp3',
-  yeahFinalLap: 'F-Zero GX - SFX/Yeah, the final lap.mp3',
-  finish: 'F-Zero GX - SFX/finiiish.mp3',
+  raceGpRulesAnnouncement: 'Other SFX/RaceGP_Rules_Announcement.wav',
+  overtake: 'F-Zero GX - SFX/whoosh L-R.mp3',
   winningRun: 'https://dn721802.ca.archive.org/0/items/f-zero-gx-and-ax-original-soundtracks/CD%202%2F28.%20Hurrah%20for%20the%20Champion%20%28Winning%20Run%29.mp3',
-  overtake: 'F-Zero GX - SFX/whoosh L-R.mp3'
 };
+const RIDGE_RACER_VOICES = {
+  threeTwoOneGo: 'Ridge Racer 5 - SFX/3_2_1_Go.wav',
+  goodLuck: "Ridge Racer 5 - SFX/Here we go, good luck.mp3",
+  maniac: 'Ridge Racer 5 - SFX/Whats that maniac thinking, someone stop him.mp3',
+  tooClose: 'Ridge Racer 5 - SFX/Too close for comfort.mp3',
+  toughBattle: 'Ridge Racer 5 - SFX/This is one tough battle.mp3',
+  itsTheFinalLap: 'Ridge Racer 5 - SFX/Can he keep the lead - its the final lap.wav',
+  finalStretch: 'Ridge Racer 5 - SFX/Finish Line is just ahead, final stretch.mp3',
+  winner: 'Ridge Racer 5 - SFX/Finish, there goes the winner.mp3',
+  closeFinish: 'Ridge Racer 5 - SFX/Finish, that was close.wav',
+  photoFinish: 'Ridge Racer 5 - SFX/Gonna be a photo finish.mp3'
+};
+
+let ridgeRacerVoiceQueue = [];
+let ridgeRacerVoicePlayed = new Set();
+let ridgeRacerVoicePlaying = false;
+let ridgeRacerVoicePlaybackToken = 0;
+let ridgeRacerPhotoFinishTimer = null;
+let ridgeRacerVoicePending = new Set();
+let ridgeRacerTriggerTimers = new Map();
+
 const SEASONAL_FINAL_TRACKS = [
   'green plant',  // 0 = Frühling
   'fire field',   // 1 = Sommer
@@ -143,7 +170,148 @@ const soundcloudSlots = {
   }
 };
 let globalAudioMuted = false;
+let autoplayAnnouncementPending = false;
 let musicSequence = createEmptyMusicSequence();
+
+function queueRidgeRacerVoice(key, delayAfterMs = 0) {
+  if (!ridgeRacerVoiceAudio || !activeShow()?.settings?.musicEnabled || !musicSequence.autoplay || pres?.debugFastForward) return;
+  const source = RIDGE_RACER_VOICES[key];
+  if (!source || ridgeRacerVoicePlayed.has(key)) return;
+  ridgeRacerVoicePlayed.add(key);
+  ridgeRacerVoiceQueue.push({ key, source, delayAfterMs });
+  playNextRidgeRacerVoice();
+}
+
+function queueRidgeRacerVoiceAfterStep(key) {
+  if (
+    ridgeRacerVoicePlayed.has(key) ||
+    ridgeRacerVoicePending.has(key) ||
+    !pres ||
+    !musicSequence.autoplay ||
+    !activeShow()?.settings?.musicEnabled ||
+    pres.debugFastForward
+  ) return;
+
+  ridgeRacerVoicePending.add(key);
+
+  // presSpeed wird in Millisekunden verwendet.
+  const delayMs = Math.max(0, Number(presSpeed) || 0);
+
+  const timer = setTimeout(() => {
+    ridgeRacerTriggerTimers.delete(key);
+    ridgeRacerVoicePending.delete(key);
+
+    if (
+      !pres ||
+      !musicSequence.autoplay ||
+      !activeShow()?.settings?.musicEnabled ||
+      pres.debugFastForward
+    ) return;
+
+    queueRidgeRacerVoice(key);
+  }, delayMs);
+
+  ridgeRacerTriggerTimers.set(key, timer);
+}
+
+function playNextRidgeRacerVoice() {
+  if (ridgeRacerVoicePlaying || !ridgeRacerVoiceQueue.length) return;
+  if (!pres || !musicSequence.autoplay || !activeShow()?.settings?.musicEnabled || pres.debugFastForward) {
+    ridgeRacerVoiceQueue.length = 0;
+    return;
+  }
+  const voice = ridgeRacerVoiceQueue.shift(), playbackToken = ridgeRacerVoicePlaybackToken;
+  let completed = false;
+  ridgeRacerVoicePlaying = true;
+  const complete = () => {
+    if (completed || playbackToken !== ridgeRacerVoicePlaybackToken) return;
+    completed = true;
+    ridgeRacerVoicePlaying = false;
+    if (voice.delayAfterMs > 0) ridgeRacerPhotoFinishTimer = setTimeout(() => { ridgeRacerPhotoFinishTimer = null; playNextRidgeRacerVoice(); }, voice.delayAfterMs);
+    else playNextRidgeRacerVoice();
+  };
+  playHtmlAudio(ridgeRacerVoiceAudio, voice.source, {
+    baseVolume: AUDIO_VOLUME.effect,
+    onEnded: complete,
+    onFailure: error => { console.warn(`Ridge Racer 5 voice "${voice.key}" could not be played.`, error); complete(); }
+  });
+}
+
+function stopRidgeRacerVoicePlayback() {
+  ridgeRacerVoicePlaybackToken++;
+  for (const timer of ridgeRacerTriggerTimers.values()) {
+    clearTimeout(timer);
+  }
+
+  ridgeRacerTriggerTimers.clear();
+  ridgeRacerVoicePending.clear();
+
+  if (ridgeRacerPhotoFinishTimer !== null) { clearTimeout(ridgeRacerPhotoFinishTimer); ridgeRacerPhotoFinishTimer = null; }
+  ridgeRacerVoiceQueue.length = 0;
+  ridgeRacerVoicePlaying = false;
+  if (!ridgeRacerVoiceAudio) return;
+  ridgeRacerVoiceAudio.pause();
+  ridgeRacerVoiceAudio.onended = ridgeRacerVoiceAudio.onerror = null;
+  ridgeRacerVoiceAudio.removeAttribute('src');
+  ridgeRacerVoiceAudio.load();
+}
+
+function resetRidgeRacerVoiceTriggers() {
+  stopRidgeRacerVoicePlayback();
+  ridgeRacerVoicePlayed.clear();
+}
+
+
+function checkRidgeRacerVoiceTriggers() {
+  const show = activeShow();
+  if (!show || !pres || !musicSequence.autoplay || !show.settings?.musicEnabled || pres.debugFastForward) return;
+
+  const event = pres.events[presIndex];
+  if (!event) return;
+
+  const totals = getPresTotals();
+  const scores = Object.values(totals).map(value => Number(value) || 0).sort((a, b) => b - a);
+  const maxJuryPoints = Math.max(0, ...pointsList(show).map(value => Number(value) || 0));
+
+  // 1. This is one tough battle
+  if (
+    event.type === 'jury-end' &&
+    event.juryIndex === show.juries.length - 4 &&
+    scores.length >= 2 &&
+    scores[0] - scores[1] <= maxJuryPoints
+  ) {
+    queueRidgeRacerVoice('toughBattle');
+  }
+
+  // 2. Whats that maniac thinking, someone stop him
+  if (event.type === 'jury-end' && event.juryIndex + 1 >= Math.ceil(show.juries.length / 2) && scores.length >= 2 && scores[0] - scores[1] > 2 * maxJuryPoints) {
+    queueRidgeRacerVoiceAfterStep('maniac');
+  }
+
+  // 3. Too close for comfort
+  const scoreCounts = new Map();
+  Object.values(totals).forEach(value => {
+    const score = Number(value) || 0;
+    if (score > 0) scoreCounts.set(score, (scoreCounts.get(score) || 0) + 1);
+  });
+
+  if ([...scoreCounts.values()].some(count => count >= 5)) queueRidgeRacerVoiceAfterStep('tooClose');
+
+  // 4. Finish Line is just ahead, final stretch
+  const winnerIndex = pres.events.findIndex(item => item.type === 'winner');
+  if (winnerIndex >= 4 && presIndex === winnerIndex - 4) queueRidgeRacerVoice('finalStretch');
+
+  // 5. Siegeransage
+  if (event.type === 'winner') {
+    const winnerIds = Array.isArray(event.winnerIds) ? event.winnerIds : [];
+    if (winnerIds.length === 1) queueRidgeRacerVoice('winner');
+    else if (winnerIds.length >= 2) {
+      queueRidgeRacerVoice('closeFinish', 10000);
+      queueRidgeRacerVoice('photoFinish');
+    }
+  }
+}
+
 
 function createEmptyMusicSequence() {
   return {
@@ -334,6 +502,7 @@ function setGlobalAudioMuted(muted) {
   setHtmlAudioVolume(winnerAudio, AUDIO_VOLUME.winner);
   setHtmlAudioVolume(entryAudio, AUDIO_VOLUME.background);
   setHtmlAudioVolume(overtakeAudio, AUDIO_VOLUME.effect);
+  setHtmlAudioVolume(ridgeRacerVoiceAudio, AUDIO_VOLUME.effect);
 
   Object.values(soundcloudSlots).forEach(slot => {
     if (slot.widget) {
@@ -385,7 +554,7 @@ function fadeSoundCloudSlot(slotName, durationMs = TRACK_FADE_OUT_MS, sequence =
       }
       const initialVolume = Number.isFinite(Number(rawVolume))
         ? Math.max(0, Math.min(100, Number(rawVolume)))
-        : SOUNDCLOUD_PLAYER_VOLUME;
+        : getSoundCloudVolume(slot.role);
       const startedAt = performance.now();
       const tick = () => {
         if (sequence !== musicSequence || !sequence.autoplay || slot.fadeResolve !== finish) {
@@ -425,10 +594,10 @@ function fadeSoundCloudSlot(slotName, durationMs = TRACK_FADE_OUT_MS, sequence =
     };
     try {
       if (typeof slot.widget.getVolume === 'function') slot.widget.getVolume(begin);
-      else begin(SOUNDCLOUD_PLAYER_VOLUME);
+      else begin(getSoundCloudVolume(slot.role));
     } catch (error) {
       console.warn(`Could not read SoundCloud player ${slotName} volume for fading.`, error);
-      begin(SOUNDCLOUD_PLAYER_VOLUME);
+      begin(getSoundCloudVolume(slot.role));
     }
   });
 }
@@ -734,7 +903,7 @@ function handleSoundCloudFinish(slotName) {
     sequence.winnerRunStarted = true;
     musicDebug('Starting Winning Run after post-finish delay', { delayMs: WINNER_RUN_DELAY_MS });
     const playback = playHtmlAudio(winnerAudio, JINGLE_TRACKS.winningRun, {
-      baseVolume: AUDIO_VOLUME.winner,
+      baseVolume: AUDIO_VOLUME.background,
       onFailure: error => {
         console.error('Winning Run could not be played.', error);
         toast('The Winning Run audio could not be loaded.');
@@ -766,7 +935,7 @@ async function loadSoundCloudTrack(url, slotName, options = {}) {
   slot.pendingRole = options.role || 'background';
   slot.loop = options.loop || null;
   slot.loopSeekPending = false;
-  widget.setVolume(globalAudioMuted ? 0 : SOUNDCLOUD_PLAYER_VOLUME);
+  widget.setVolume(globalAudioMuted ? 0 : getSoundCloudVolume(options.role || 'background'));
   musicDebug('SoundCloud load requested', { player: slotName, url, role: options.role || 'background', autoPlay });
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -796,7 +965,7 @@ async function loadSoundCloudTrack(url, slotName, options = {}) {
       slot.loaded = true;
       slot.role = slot.pendingRole;
       slot.pendingRole = null;
-      widget.setVolume(globalAudioMuted ? 0 : SOUNDCLOUD_PLAYER_VOLUME);
+      widget.setVolume(globalAudioMuted ? 0 : getSoundCloudVolume(slot.role));
       widget.seekTo(0);
       if (autoPlay) {
         applyPresentationTrackTheme(options.trackName);
@@ -932,7 +1101,7 @@ async function beginFinalLap(reason) {
       preparedPlayer: 'B',
       delayMs: FINAL_LAP_SWITCH_DELAY_MS
     });
-    playHtmlAudio(jingleAudio, JINGLE_TRACKS.yeahFinalLap, {
+    playHtmlAudio(jingleAudio, RIDGE_RACER_VOICES.itsTheFinalLap, {
       baseVolume: AUDIO_VOLUME.effect,
       onFailure: error => console.error('The final-lap sound effect could not be played.', error)
     });
@@ -1014,11 +1183,17 @@ function startNormalTrackForRound(roundIndex, options = {}) {
   if (!musicSequence.countdownPlayed) {
     musicSequence.countdownPlayed = true;
     const currentSequence = musicSequence;
+
     currentSequence.countdownTimer = setTimeout(() => {
       if (musicSequence !== currentSequence || !musicSequence.autoplay) return;
+
       musicDebug('Playing 3-2-1-Go sound effect');
-      playHtmlAudio(jingleAudio, JINGLE_TRACKS.threeTwoOneGo, {
+      playHtmlAudio(jingleAudio, RIDGE_RACER_VOICES.threeTwoOneGo, {
         baseVolume: AUDIO_VOLUME.effect,
+        onEnded: () => {
+          if (musicSequence !== currentSequence || !musicSequence.autoplay) return;
+          setTimeout(() => queueRidgeRacerVoice('goodLuck'), 4000);
+        },
         onFailure: error => console.error('The countdown sound effect could not be played.', error)
       });
     }, THREE_TWO_ONE_GO_MS);
@@ -1197,16 +1372,9 @@ function beginWinnerSequence() {
   if (!musicSequence.autoplay || musicSequence.winnerStarted) return;
   resetPresentationTrackTheme();
   musicSequence.winnerStarted = true;
-  musicDebug('Winner is confirmed; starting finish sequence', { htmlAudio: 'finiiish.mp3', soundCloud: 'Finish to go' });
+  musicDebug('Winner is confirmed; starting finish sequence', { htmlAudio: 'Depends on winning situation now.', soundCloud: 'Finish to go' });
   stopSoundCloudSlot('A');
   stopSoundCloudSlot('B');
-  playHtmlAudio(jingleAudio, JINGLE_TRACKS.finish, {
-    baseVolume: AUDIO_VOLUME.effect,
-    onFailure: error => {
-      console.error('The finish sound effect could not be played.', error);
-      toast('The finish sound effect could not be loaded.');
-    }
-  });
   const finishToGoUrl = MUSIC_TRACKS['finish to go']?.normal;
   loadSoundCloudTrack(finishToGoUrl, 'A', {
     autoPlay: true,
@@ -1220,8 +1388,16 @@ function beginWinnerSequence() {
 }
 
 function handleMusicForPresentationStep() {
-  if (!activeShow()?.settings?.musicEnabled || !musicSequence.autoplay || !pres || pres.debugFastForward) return;
+  if (
+    !activeShow()?.settings?.musicEnabled ||
+    !musicSequence.autoplay ||
+    !pres ||
+    pres.debugFastForward
+  ) return;
+
   if (presIndex === 0 && !musicSequence.preViewEnded) return;
+
+  checkRidgeRacerVoiceTriggers();
   triggerAutoplayMusicForCurrentEvent();
 }
 
@@ -1239,6 +1415,7 @@ function resetMusicSequence() {
 function stopMusic() {
   cancelLongPreviewPreload();
   stopEntryMusic();
+  stopRidgeRacerVoicePlayback();
   stopSoundCloudSlot('A');
   stopSoundCloudSlot('B');
   [audio, jingleAudio, winnerAudio].forEach(element => {
@@ -1999,6 +2176,7 @@ function startPresentation() {
     return;
   }
   stopMusic();
+  resetRidgeRacerVoiceTriggers();
   if (s.settings?.musicEnabled) {
     preloadLongPreview().then(ready => {
       if (ready) musicDebug('Long Preview preloaded on entering Jury Voting');
@@ -2558,6 +2736,7 @@ function presPrev() {
 
 function presReset() {
   if (!pres) return;
+  autoplayAnnouncementPending = false;
   stopMusic();
   pres.debugFastForward = false;
   document.getElementById('presentation').classList.remove('debug-fast-forward');
@@ -2573,6 +2752,44 @@ function presReset() {
 
 function presPause() {
   if (presPaused) {
+    if (autoplayAnnouncementPending) return;
+
+    // Die Ansage wird nur beim allerersten Autoplay-Start abgespielt.
+    if (
+      presIndex === 0 &&
+      !musicSequence.autoplay &&
+      activeShow()?.settings?.musicEnabled &&
+      !pres?.debugFastForward
+    ) {
+      autoplayAnnouncementPending = true;
+
+      const currentPresentation = pres;
+
+      const continueAutoplay = () => {
+        if (!autoplayAnnouncementPending) return;
+
+        autoplayAnnouncementPending = false;
+
+        setTimeout(() => {
+          if (pres !== currentPresentation || !presPaused) return;
+
+          startLiveJuryMusicIfAllowed();
+          startAuto();
+        }, 3000);
+      };
+
+      playHtmlAudio(jingleAudio, JINGLE_TRACKS.raceGpRulesAnnouncement, {
+        baseVolume: AUDIO_VOLUME.effect,
+        onEnded: continueAutoplay,
+        onFailure: error => {
+          console.warn('RaceGP rules announcement could not be played.', error);
+          continueAutoplay();
+        }
+      });
+
+      return;
+    }
+
     startLiveJuryMusicIfAllowed();
     startAuto();
   } else {
@@ -2585,6 +2802,7 @@ function presPause() {
 }
 
 function closePres() {
+  autoplayAnnouncementPending = false;
   stopPresTimer();
   clearPresReveal();
   clearPresPostAnimationWait();
