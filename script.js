@@ -214,6 +214,119 @@ function queueRidgeRacerVoiceAfterStep(key) {
   ridgeRacerTriggerTimers.set(key, timer);
 }
 
+function canLoadRidgeRacerVoiceFile(source) {
+  return new Promise(resolve => {
+    const probe = new Audio();
+    let settled = false;
+
+    const timeoutId = setTimeout(() => finish(false), 5000);
+
+    function finish(available) {
+      if (settled) return;
+      settled = true;
+
+      clearTimeout(timeoutId);
+      probe.removeEventListener('loadedmetadata', onLoaded);
+      probe.removeEventListener('error', onError);
+
+      probe.removeAttribute('src');
+      probe.load();
+
+      resolve(available);
+    }
+
+    function onLoaded() {
+      finish(true);
+    }
+
+    function onError() {
+      finish(false);
+    }
+
+    probe.preload = 'metadata';
+    probe.addEventListener('loadedmetadata', onLoaded);
+    probe.addEventListener('error', onError);
+
+    probe.src = source;
+    probe.load();
+  });
+}
+
+async function queueRidgeRacerLapsToGo(juryIndex, juryCount) {
+  if (
+    !Number.isInteger(juryIndex) ||
+    juryIndex <= 0 ||
+    juryIndex >= juryCount ||
+    !Number.isInteger(juryCount) ||
+    !ridgeRacerVoiceAudio ||
+    !pres ||
+    !musicSequence.autoplay ||
+    !activeShow()?.settings?.musicEnabled ||
+    pres.debugFastForward
+  ) return;
+
+  const lapsToGo = juryCount - juryIndex;
+  if (lapsToGo < 2) return;
+
+  const key = `lapsToGo-${lapsToGo}`;
+
+  if (
+    ridgeRacerVoicePlayed.has(key) ||
+    ridgeRacerVoicePending.has(key)
+  ) return;
+
+  ridgeRacerVoicePending.add(key);
+  const playbackToken = ridgeRacerVoicePlaybackToken;
+
+  const basePath = `Ridge Racer 5 - SFX/${lapsToGo} Laps to Go`;
+  const candidates = [
+    `${basePath}.mp3`,
+    `${basePath}.wav`
+  ];
+
+  let source = null;
+
+  for (const candidate of candidates) {
+    if (await canLoadRidgeRacerVoiceFile(candidate)) {
+      source = candidate;
+      break;
+    }
+  }
+
+  if (!source) {
+    console.debug(
+      `[Ridge Racer 5] No audio file available for ${lapsToGo} laps to go. Skipping playback (this is expected).`
+    );
+    ridgeRacerVoicePending.delete(key);
+    return;
+  }
+
+  ridgeRacerVoicePending.delete(key);
+
+  const currentEvent = pres?.events?.[presIndex];
+
+  if (
+    !source ||
+    playbackToken !== ridgeRacerVoicePlaybackToken ||
+    !pres ||
+    currentEvent?.type !== 'jury-intro' ||
+    currentEvent.juryIndex !== juryIndex ||
+    !musicSequence.autoplay ||
+    !activeShow()?.settings?.musicEnabled ||
+    pres.debugFastForward
+  ) return;
+
+  ridgeRacerVoicePlayed.add(key);
+
+  ridgeRacerVoiceQueue.push({
+    key,
+    source,
+    delayAfterMs: 0
+  });
+
+  playNextRidgeRacerVoice();
+}
+
 function playNextRidgeRacerVoice() {
   if (ridgeRacerVoicePlaying || !ridgeRacerVoiceQueue.length) return;
   if (!pres || !musicSequence.autoplay || !activeShow()?.settings?.musicEnabled || pres.debugFastForward) {
@@ -269,6 +382,14 @@ function checkRidgeRacerVoiceTriggers() {
   const event = pres.events[presIndex];
   if (!event) return;
 
+  // X Laps to Go – nur ab der zweiten Jury-Runde
+  if (event.type === 'jury-intro') {
+    queueRidgeRacerLapsToGo(
+      event.juryIndex,
+      show.juries.length
+    );
+  }
+
   const totals = getPresTotals();
   const scores = Object.values(totals).map(value => Number(value) || 0).sort((a, b) => b - a);
   const maxJuryPoints = Math.max(0, ...pointsList(show).map(value => Number(value) || 0));
@@ -278,7 +399,7 @@ function checkRidgeRacerVoiceTriggers() {
     event.type === 'jury-end' &&
     event.juryIndex === show.juries.length - 4 &&
     scores.length >= 2 &&
-    scores[0] - scores[1] <= maxJuryPoints
+    scores[0] - scores[1] <= maxJuryPoints / 2
   ) {
     queueRidgeRacerVoice('toughBattle');
   }
@@ -1699,6 +1820,35 @@ function rankedByScore(items) {
   });
 }
 
+function rankedPresentationScores(items) {
+  const sorted = items.slice().sort(
+    (a, b) =>
+      (Number(b.score) || 0) - (Number(a.score) || 0) ||
+      String(a.name || '').localeCompare(String(b.name || ''))
+  );
+
+  let rank = 0;
+  let positiveIndex = 0;
+  let previousScore = null;
+
+  return sorted.map(item => {
+    const score = Number(item.score) || 0;
+
+    if (score <= 0) {
+      return { ...item, rank: null, score };
+    }
+
+    if (previousScore === null || score !== previousScore) {
+      rank = positiveIndex + 1;
+    }
+
+    previousScore = score;
+    positiveIndex++;
+
+    return { ...item, rank, score };
+  });
+}
+
 function standings(s = activeShow(), mode = 'combined') {
   const totals = mode === 'jury' ? totalJuryVotes(s) : mode === 'televote' ? totalTelevote(s) : combinedTotals(s);
   return rankedByScore((s?.participants || []).map(p => ({ ...p, score: totals[p.id] || 0 })));
@@ -2408,7 +2558,7 @@ function animatePresRanking(totals) {
   if (!ranks) return 0;
   const rows = Array.from(ranks.querySelectorAll('.pres-rank'));
   if (rows.length < 2) return 0;
-  const ordered = rankedByScore(Object.entries(totals).map(([id, score]) => ({ id, name: contestant(id)?.name || '', score: Number(score) || 0 })).filter(item => rows.some(row => row.dataset.scoreId === item.id)));
+  const ordered = rankedPresentationScores(Object.entries(totals).map(([id, score]) => ({ id, name: contestant(id)?.name || '', score: Number(score) || 0 })).filter(item => rows.some(row => row.dataset.scoreId === item.id)));
   const byId = new Map(rows.map(row => [row.dataset.scoreId, row]));
   if (pres?.debugFastForward) {
     ordered.forEach(item => {
@@ -2416,8 +2566,9 @@ function animatePresRanking(totals) {
       ranks.appendChild(row);
       const position = row.querySelector('.pres-rank-position');
       if (position) {
-        position.innerHTML = ordinalHTML(item.rank);
-        position.className = 'pres-rank-position ' + presRankClass(item.rank);
+        position.innerHTML = item.rank === null ? '—' : ordinalHTML(item.rank);
+        position.className = 'pres-rank-position ' +
+          (item.rank === null ? 'is-unranked' : presRankClass(item.rank));
       }
     });
     return 0;
@@ -2428,8 +2579,9 @@ function animatePresRanking(totals) {
     ranks.appendChild(row);
     const position = row.querySelector('.pres-rank-position');
     if (position) {
-      position.innerHTML = ordinalHTML(item.rank);
-      position.className = 'pres-rank-position ' + presRankClass(item.rank);
+      position.innerHTML = item.rank === null ? '—' : ordinalHTML(item.rank);
+      position.className = 'pres-rank-position ' +
+        (item.rank === null ? 'is-unranked' : presRankClass(item.rank));
     }
   });
   const moved = [];
@@ -2610,7 +2762,7 @@ function renderPres(phase = 'reveal') {
   const scoringEvent = (ev.type === 'jury-point' || ev.type === 'tv-point') ? ev : null;
   const baseTotals = scoringEvent ? getPresTotalsBeforeCurrent() : totals;
   const orderingTotals = beforeAddition ? baseTotals : totals;
-  const scoreOrder = rankedByScore(Object.entries(orderingTotals).map(([id, score]) => {
+  const scoreOrder = rankedPresentationScores(Object.entries(orderingTotals).map(([id, score]) => {
     const item = contestant(id, s);
     return item ? { p: item, name: item.name, score: Number(score) || 0 } : null;
   }).filter(Boolean));
@@ -2656,7 +2808,7 @@ function renderPres(phase = 'reveal') {
         : (totals[item.p.id] || 0);
 
     return `<div class="pres-rank ${isTarget ? 'is-scoring' : ''}" data-score-id="${safe(item.p.id)}">
-      <span class="pres-rank-position ${presRankClass(item.rank)}">${ordinalHTML(item.rank)}</span>
+      <span class="pres-rank-position ${item.rank === null ? 'is-unranked' : presRankClass(item.rank)}">${item.rank === null ? '—' : ordinalHTML(item.rank)}</span>
       <span class="pres-rank-country">${flagImageHTML(item.p.flag, 30)}<span>${safe(item.p.name)}</span></span>
       <b>
         ${delta !== undefined ? `<span class="pres-rank-delta">+${delta}</span>` : ''}
@@ -2986,7 +3138,15 @@ function revealPresPoints() {
   const after = getPresTotals();
   const from = before[ev.participantId] || 0;
   const to = after[ev.participantId] || 0;
-  const participantRank = totals => rankedByScore(Object.entries(totals).map(([id, score]) => ({ id, name: contestant(id)?.name || '', score: Number(score) || 0 }))).findIndex(item => item.id === ev.participantId) + 1;
+  const participantRank = totals =>
+    rankedPresentationScores(
+      Object.entries(totals).map(([id, score]) => ({
+        id,
+        name: contestant(id)?.name || '',
+        score: Number(score) || 0
+      }))
+    ).find(item => item.id === ev.participantId)?.rank ?? 0;
+  
   const previousRank = participantRank(before);
   const nextRank = participantRank(after);
   const nonLeaderOvertake = previousRank > 0 && nextRank > 0 && nextRank < previousRank && nextRank > 1;
