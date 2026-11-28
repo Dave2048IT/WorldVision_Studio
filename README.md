@@ -64,10 +64,11 @@ WorldVision_Studio_v3.16/
 └── F-Zero GX - SFX/                 (für lokale Soundeffekte)
     ├── Three two one go - louder.mp3
     ├── Yeah, the final lap.mp3
-    └── finiiish.mp3
+    ├── finiiish.mp3
+└── New Course Record.mp3
 ```
 
-Der Ordner `F-Zero GX - SFX` wird im bereitgestellten Quellpaket nicht automatisch mitgeliefert. Soll die Musikfunktion verwendet werden, muss er neben `index.html` angelegt und mit den drei MP3-Dateien in exakt dieser Schreibweise bestückt werden. Ohne diese lokalen Dateien können die betreffenden Soundeffekte nicht geladen werden. Bei deaktivierter Musik-Einstellung wird ohnehin keine Audiodatei abgespielt.
+Der Ordner `F-Zero GX - SFX` wird im bereitgestellten Quellpaket nicht automatisch mitgeliefert. Soll die Musikfunktion verwendet werden, muss er neben `index.html` angelegt und mit den vier MP3-Dateien in exakt dieser Schreibweise bestückt werden. Ohne diese lokalen Dateien können die betreffenden Soundeffekte nicht geladen werden. Bei deaktivierter Musik-Einstellung wird ohnehin keine Audiodatei abgespielt.
 
 ### 2.2 Voraussetzungen
 
@@ -376,17 +377,23 @@ Sobald der Gewinner feststeht, wird die bisherige Jury-/Finale-Musik beendet. Da
 - der lokale Finish-Soundeffekt `finiiish.mp3`;
 - der SoundCloud-Titel **Finish to go**.
 
+Die Ridge-Racer-5-Finish-Voicelines werden über eine gemeinsame Warteschlange abgespielt. Bei einem neuen All-Time-Rekord wird `F-Zero GX - SFX/New Course Record.mp3` als letzter Eintrag dieser Finish-Warteschlange angehängt. Bei einem alleinigen Sieger folgt der Sound auf die Siegeransage; bei einem geteilten Sieg folgt er auf beide Finish-Voicelines einschließlich ihrer vorgesehenen Verzögerung. Die Toast-Meldung auf der Siegerfolie bleibt davon unabhängig und erscheint weiterhin sofort beim Erkennen des neuen Rekords.
+
 Nach dem Ende von **Finish to go** wartet die Anwendung weitere 5 Sekunden und startet anschließend den **Winning Run** aus dem Internet Archive. Die Gastgeberbekanntgabe wird erst freigegeben, wenn die Winning-Run-Wiedergabe tatsächlich begonnen hat.
 
 ### 7.8 Lokale Audiodateien
 
-Die drei lokalen Soundeffekte werden relativ zum Ordner von `index.html` geladen:
+Die vier lokalen Soundeffekte werden relativ zum Ordner von `index.html` geladen:
 
 ```text
 F-Zero GX - SFX/
 ├── Three two one go - louder.mp3
 ├── Yeah, the final lap.mp3
-└── finiiish.mp3
+├── finiiish.mp3
+└── New Course Record.mp3
+
+Ridge Racer 5 - SFX/
+└── (die in Abschnitt 7 verwendeten lokalen Voice-Dateien)
 ```
 
 Die Dateien müssen exakt so heißen und im angegebenen Unterordner liegen. Die Long Course Pre-View, U-Rays (Tutorial), Finish to go und Winning Run werden dagegen über externe Audioquellen geladen.
@@ -414,15 +421,25 @@ Die Anwendung zeigt in der Seitenleiste den Speicherstatus an. Schlägt das Spei
 
 ### 8.2 JSON-Export
 
-**Export / Backup** erzeugt eine JSON-Datei mit allen gespeicherten Shows. Die Datei enthält unter anderem den Namen der Anwendung, die Exportformatversion, den Exportzeitpunkt, die aktive Show-ID und das Show-Array.
+**Export / Backup** erzeugt eine JSON-Datei mit allen gespeicherten Shows sowie den All-Time-High-Score-Daten und der Record History. Die Datei enthält unter anderem den Namen der Anwendung, die Exportformatversion, den Exportzeitpunkt, die aktive Show-ID, das Show-Array und die globalen Rekorddaten.
 
-Der Export enthält keine eingebetteten Audio-Dateien. Integrierte Online-Musik wird über die in der Anwendung hinterlegten Quellen geladen. Die drei lokalen Soundeffekte müssen separat im Ordner `F-Zero GX - SFX` vorhanden sein.
+Der Export enthält keine eingebetteten Audio-Dateien. Integrierte Online-Musik wird über die in der Anwendung hinterlegten Quellen geladen. Die vier lokalen Soundeffekte müssen separat im Ordner `F-Zero GX - SFX` vorhanden sein.
 
 ### 8.3 JSON-Import
 
 **Import** liest eine JSON-Datei und fügt die darin enthaltenen Shows zur aktuellen lokalen Sammlung hinzu. Bereits vorhandene Shows werden nicht automatisch ersetzt.
 
 Beim Import erhalten die importierten Shows neue interne Show-IDs. Die Teilnehmer- und Jury-Datensätze werden aus dem JSON übernommen. Die erste importierte Show wird anschließend aktiviert. Die Musik-Einstellung wird für importierte Shows aus Sicherheits- und Kompatibilitätsgründen deaktiviert; sie kann danach in **Settings** wieder eingeschaltet werden.
+
+### 8.5 All-Time High Scores
+
+WorldVision Studio speichert All-Time High Scores getrennt nach Punkteschema und Televote-Einstellung. Benutzerdefinierte Punkteschemata werden anhand ihrer konkreten Punkteverteilung unterschieden. Pro Kategorie wird nur ein strikt höherer Punktestand als neuer Rekord übernommen; bei einem Gleichstand auf dem höchsten Punktestand werden alle betroffenen Teilnehmer als Rekordhalter gespeichert.
+
+Ein Rekordeintrag enthält die Punktzahl, Rekordhalter, Teilnehmerzahl, Juryanzahl, Punkteschema, Televote-Status, Show-Ausgabe sowie Datum und Uhrzeit. Die Rekordprüfung erfolgt unmittelbar beim Erreichen der Gewinnerfolie. Ein neuer Rekord wird dort direkt angezeigt und gespeichert; das Schließen der Präsentation ist dafür nicht erforderlich.
+
+Die Rekorde und die Record History werden zusammen mit den Shows exportiert. Beim Import werden Rekorde ergänzt bzw. nur dann ersetzt, wenn der importierte Rekord höher ist. Die vorhandenen Rekorde werden dadurch nicht durch ältere Backup-Daten überschrieben.
+
+Auf der Übersichtsseite kann eine einzelne Rekordkategorie über **Delete** entfernt werden. Nach einer Sicherheitsabfrage werden dabei auch alle History-Einträge genau dieser Kategorie gelöscht. **Clear all records** entfernt nach einer separaten Bestätigung sämtliche All-Time-Rekorde und die komplette Record History. Shows, Teilnehmer, Jurys und Abstimmungen bleiben dabei erhalten.
 
 ### 8.4 Backup-Empfehlungen
 
@@ -449,7 +466,7 @@ Prüfe, ob der Flaggen-Code aus genau zwei Buchstaben besteht und ob eine Intern
 Prüfe zunächst die zentrale Musik-Einstellung und die globale **Mute**-Schaltfläche. Für SoundCloud- und Internet-Archive-Inhalte ist eine Internetverbindung erforderlich. Der Browser kann die automatische Einstiegs-Musik blockieren; in diesem Fall wird nach einer Benutzerinteraktion erneut versucht, sie zu starten.
 
 **Ein lokaler Soundeffekt fehlt.**  
-Prüfe den Ordnernamen `F-Zero GX - SFX` und die exakte Schreibweise der drei MP3-Dateinamen. Der Unterordner muss direkt neben `index.html` liegen. Wenn die zentrale Musik-Einstellung ausgeschaltet ist, werden absichtlich keine lokalen Soundeffekte abgespielt.
+Prüfe den Ordnernamen `F-Zero GX - SFX` und die exakte Schreibweise der vier MP3-Dateinamen. Der Unterordner muss direkt neben `index.html` liegen. Wenn die zentrale Musik-Einstellung ausgeschaltet ist, werden absichtlich keine lokalen Soundeffekte abgespielt.
 
 **Die Sprintstrecke zeigt keine Flaggen.**  
 Die Sprintstrecke wird innerhalb der Live-Präsentation gerendert. Prüfe, ob mindestens zwei Teilnehmer vorhanden sind und ob die Präsentation tatsächlich gestartet wurde. Flaggenbilder benötigen zusätzlich einen gültigen Flaggen-Code oder werden als Platzhalter dargestellt.

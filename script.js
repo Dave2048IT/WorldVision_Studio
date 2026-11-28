@@ -56,7 +56,7 @@ const PRESENTATION_TRACK_THEMES = {
 };
 const AUDIO_VOLUME = {
   background: 0.7,
-  winner: 0.5,
+  winner: 0.4,
   effect: 1
 };
 const SOUNDCLOUD_PLAYER_VOLUME = 80;
@@ -119,7 +119,8 @@ const RIDGE_RACER_VOICES = {
   finalStretch: 'Ridge Racer 5 - SFX/Finish Line is just ahead, final stretch.mp3',
   winner: 'Ridge Racer 5 - SFX/Finish, there goes the winner.mp3',
   closeFinish: 'Ridge Racer 5 - SFX/Finish, that was close.wav',
-  photoFinish: 'Ridge Racer 5 - SFX/Gonna be a photo finish.mp3'
+  photoFinish: 'Ridge Racer 5 - SFX/Gonna be a photo finish.mp3',
+  newCourseRecord: 'F-Zero GX - SFX/New Course Record.mp3'
 };
 
 let ridgeRacerVoiceQueue = [];
@@ -425,10 +426,17 @@ function checkRidgeRacerVoiceTriggers() {
   // 5. Siegeransage
   if (event.type === 'winner') {
     const winnerIds = Array.isArray(event.winnerIds) ? event.winnerIds : [];
-    if (winnerIds.length === 1) queueRidgeRacerVoice('winner');
+    if (winnerIds.length === 1) queueRidgeRacerVoice('winner', 7000);
     else if (winnerIds.length >= 2) {
       queueRidgeRacerVoice('closeFinish', 10000);
-      queueRidgeRacerVoice('photoFinish');
+      queueRidgeRacerVoice('photoFinish',  7000);
+    }
+
+    // A new-record announcement is always the final item in the existing
+    // finish-voice queue, after the solo-winner or shared-winner sound sequence.
+    if (pres.newAllTimeRecord && !pres.newRecordSoundQueued) {
+      pres.newRecordSoundQueued = true;
+      queueRidgeRacerVoice('newCourseRecord');
     }
   }
 }
@@ -1691,11 +1699,134 @@ function blankShow(name = 'WorldVision 2026') {
 
 function initialDB() {
   const s = blankShow('My first WorldVision show');
-  return { version: 1, musicSettingMigratedV313: true, activeShowId: s.id, shows: [s] };
+  return { version: 1, musicSettingMigratedV313: true, activeShowId: s.id, shows: [s], allTimeRecords: {}, recordHistory: [] };
 }
 let juryImportPreview = null, juryImportText = '';
 let db = loadDB(), view = 'home', pres = null, presIndex = 0, presTimer = null, presRevealTimer = null, presRevealPending = false, presRevealRemaining = 0, presRevealStartedAt = 0, presPostAnimationTimer = null, presPostAnimationPending = false, presPostAnimationRemaining = 0, presPostAnimationStartedAt = 0, presSpeed = 3000, presPaused = true, toastTimer = null, spoilersRevealed = false, jurySpoilersRevealed = false;
 const root = document.getElementById('viewRoot');
+
+function scoringRecordCategory(s) {
+  const points = pointsList(s).map(Number).filter(Number.isFinite).sort((a, b) => b - a);
+  let preset = s?.settings?.pointPreset || '';
+  if (!preset) {
+    const signature = points.join(',');
+    preset = signature === POINTS.join(',') ? 'esc'
+      : signature === '5,4,3,2,1' ? 'top5'
+      : signature === FZERO_GX_POINTS.join(',') ? 'fzero44'
+      : 'custom';
+  }
+  const presetLabels = {
+    esc: 'Classic ESC (12, 10, 8–1)',
+    top5: 'Top 5 (5, 4, 3, 2, 1)',
+    fzero44: 'F-Zero GX + Extra (44 values)'
+  };
+  const isKnownPreset = Object.prototype.hasOwnProperty.call(presetLabels, preset);
+  const scoringSystemId = isKnownPreset ? preset : `custom:${points.join(',')}`;
+  const scoringSystemLabel = isKnownPreset ? presetLabels[preset] : `Custom scoring (${points.join(', ')})`;
+  const televoteEnabled = Boolean(s?.settings?.televoteEnabled);
+  return {
+    scoringSystemId,
+    scoringSystemLabel,
+    pointsSignature: points.join(','),
+    televoteEnabled,
+    key: `${scoringSystemId}|${points.join(',')}|televote:${televoteEnabled ? 'on' : 'off'}`
+  };
+}
+
+function recordDateTimeLabel(record) {
+  const date = new Date(record.createdAt);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function renderAllTimeRecords() {
+  const records = Object.values(db.allTimeRecords || {})
+    .filter(record => record && Number(record.score) > 0)
+    .sort((a, b) => String(a.scoringSystemLabel).localeCompare(String(b.scoringSystemLabel)) ||
+      Number(a.televoteEnabled) - Number(b.televoteEnabled));
+
+  const cards = records.map(record => {
+    const holders = (record.holders || []).map(holder =>
+      `<div class="all-time-holder">${flagImageHTML(holder.flag, 26)}<b>${safe(holder.name || 'Unknown participant')}</b></div>`
+    ).join('');
+    return `<article class="all-time-record-card">
+      <div class="row between wrap"><span class="pill">${safe(record.scoringSystemLabel)}</span><button class="btn small danger all-time-delete-button" data-action="delete-all-time-category" data-id="${escAttr(record.categoryKey || '')}" title="Delete this record category" aria-label="Delete ${safe(record.scoringSystemLabel)} record category">Delete</button></div><div class="smallmuted all-time-televote-label">Televote ${record.televoteEnabled ? 'enabled' : 'disabled'}</div>
+      <div class="all-time-record-score">${Number(record.score).toLocaleString()}</div>
+      <div class="smallmuted">ALL-TIME HIGH SCORE</div>
+      <div class="all-time-holders">${holders || '<span class="smallmuted">No holder details</span>'}</div>
+      <div class="all-time-record-meta"><span>${Number(record.participantCount) || 0} participants</span><span>${Number(record.juryCount) || 0} juries</span></div>
+      <div class="all-time-record-edition">${safe(record.edition || 'Unknown show')}${record.year ? ` · ${Number(record.year)}` : ''}</div>
+      <div class="smallmuted">${safe(recordDateTimeLabel(record))}</div>
+    </article>`;
+  }).join('');
+
+  const history = (db.recordHistory || []).slice().sort((a, b) =>
+    String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+  ).slice(0, 8);
+  const historyRows = history.map(record => {
+    const names = (record.holders || []).map(holder => holder.name).filter(Boolean).join(' & ');
+    return `<div class="all-time-history-row">
+      <div><b>${safe(Number(record.score).toLocaleString())} points</b><div class="smallmuted">${safe(names || 'Unknown participant')} · ${safe(record.edition || 'Unknown show')}${record.year ? ` ${Number(record.year)}` : ''} · ${safe(record.scoringSystemLabel)} · Televote ${record.televoteEnabled ? 'enabled' : 'disabled'}</div></div>
+      <div class="all-time-history-date">${safe(recordDateTimeLabel(record))}</div>
+    </div>`;
+  }).join('');
+
+  const hasAnyRecordData = records.length > 0 || (db.recordHistory || []).length > 0;
+
+  return `<section class="panel all-time-records-panel">
+    <div class="panel-head"><div><h2>All-Time High Scores</h2><div class="sub">Records are tracked separately for each scoring system and televote setting.</div></div><div class="row wrap"><span class="pill">${records.length} ${records.length === 1 ? 'category' : 'categories'}</span>${hasAnyRecordData ? '<button class="btn small danger" data-action="delete-all-time-records">Clear all records</button>' : ''}</div></div>
+    ${cards ? `<div class="all-time-record-grid">${cards}</div>` : '<div class="empty all-time-empty">No records yet. Complete a show to establish your first all-time high score.</div>'}
+    ${historyRows ? `<details class="all-time-history"><summary>Record History <span class="smallmuted">Latest ${history.length} record${history.length === 1 ? '' : 's'}</span></summary><div class="all-time-history-list">${historyRows}</div></details>` : ''}
+  </section>`;
+}
+
+function evaluateAllTimeRecord(show, runId) {
+  if (!show || !runId || !pres || pres.recordProcessed) return null;
+  pres.recordProcessed = true;
+
+  const totals = combinedTotals(show);
+  const highestScore = Math.max(0, ...Object.values(totals).map(value => Number(value) || 0));
+  if (highestScore <= 0) return null;
+
+  const category = scoringRecordCategory(show);
+  const previous = db.allTimeRecords?.[category.key];
+  if (previous && Number(previous.score) >= highestScore) return null;
+
+  const holders = (show.participants || [])
+    .filter(participant => (Number(totals[participant.id]) || 0) === highestScore)
+    .map(participant => ({
+      id: participant.id,
+      name: participant.name || 'Unknown participant',
+      flag: toISOCode(participant.flag),
+      artist: participant.artist || '',
+      song: participant.song || ''
+    }));
+
+  const record = {
+    id: uid(),
+    runId,
+    categoryKey: category.key,
+    scoringSystemId: category.scoringSystemId,
+    scoringSystemLabel: category.scoringSystemLabel,
+    pointsSignature: category.pointsSignature,
+    televoteEnabled: category.televoteEnabled,
+    score: highestScore,
+    holders,
+    participantCount: (show.participants || []).length,
+    juryCount: (show.juries || []).length,
+    edition: show.name || `WorldVision ${show.year || ''}`.trim(),
+    year: Number(show.year) || null,
+    showId: show.id,
+    createdAt: new Date().toISOString()
+  };
+
+  db.allTimeRecords = db.allTimeRecords || {};
+  db.recordHistory = Array.isArray(db.recordHistory) ? db.recordHistory : [];
+  db.allTimeRecords[category.key] = record;
+  db.recordHistory.push(clone(record));
+  if (!saveDB()) return null;
+
+  return { ...record, holderNames: holders.map(holder => holder.name).join(' & ') };
+}
 
 function loadDB() {
   try {
@@ -1715,6 +1846,14 @@ function loadDB() {
       changed = true;
     }
     const migrated = migrateFlagCodes(parsed);
+    if (!migrated.allTimeRecords || typeof migrated.allTimeRecords !== 'object' || Array.isArray(migrated.allTimeRecords)) {
+      migrated.allTimeRecords = {};
+      changed = true;
+    }
+    if (!Array.isArray(migrated.recordHistory)) {
+      migrated.recordHistory = [];
+      changed = true;
+    }
     if (changed) {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
@@ -1984,8 +2123,9 @@ function render() {
 
 function renderHome(s) {
   const cards = db.shows.map(x => `<article class="show-card"><div class="row between"><span class="pill ${x.id === s.id ? 'ok' : ''}">${x.id === s.id ? 'ACTIVE SHOW' : 'SAVED'}</span><span class="smallmuted">${safe(x.year || '')}</span></div><h3>${safe(x.name)}</h3><div class="show-stats"><span>◎ ${x.participants.length} participants</span><span>✦ ${x.juries.length} juries</span><span>◉ ${Object.keys(x.televote || {}).length} televote entries</span></div><div class="show-card-actions"><button class="btn small primary" data-action="activate" data-id="${x.id}">${x.id === s.id ? 'Open' : 'Switch to show'}</button><button class="btn small" data-action="duplicate" data-id="${x.id}">Duplicate</button><button class="btn small danger" data-action="delete-show" data-id="${x.id}">Delete</button></div></article>`).join('');
+  const allTimeRecordsHTML = renderAllTimeRecords();
   const stats = standings(s);
-  root.innerHTML = `<div class="grid3"><div class="metric"><div class="number">${s.participants.length}</div><div class="label">Participants</div></div><div class="metric"><div class="number">${s.juries.length}</div><div class="label">Jury Members</div></div><div class="metric"><div class="number">${allJuriesComplete(s) ? '✓' : s.juries.filter(j => juryComplete(j, s)).length + '/' + s.juries.length}</div><div class="label">Juries Completed</div></div></div><div class="panel"><div class="panel-head"><div><h2>Your WorldVision Shows</h2><div class="sub">Each show is stored separately on this device.</div></div><button class="btn primary" data-action="new-show">＋ New Show</button></div><div class="grid2">${cards}</div></div><div class="grid2"><div class="panel"><div class="panel-head"><div><h2>Show Checklist</h2><div class="sub">What still needs to be prepared for show night.</div></div><span class="pill ${s.participants.length >= 2 ? 'ok' : 'warn'}">${s.participants.length >= 2 ? 'Ready to go' : 'Setup needed'}</span></div><div class="stack"><div><div class="progressline"><span>Participants</span><b>${s.participants.length}</b></div><div class="statusbar"><span style="width:${Math.min(100, s.participants.length / 12 * 100)}%"></span></div></div><div><div class="progressline"><span>Jury votes</span><b>${s.juries.filter(j => juryComplete(j, s)).length}/${s.juries.length}</b></div><div class="statusbar"><span style="width:${s.juries.length ? 100 * s.juries.filter(j => juryComplete(j, s)).length / s.juries.length : 0}%"></span></div></div><div class="help">Suggested order: add participants → add juries → enter points → enter televote results → start the live show.</div></div></div><div class="panel"><div class="panel-head"><div><h2>Current Standings</h2><div class="sub">Only points entered so far are included.</div></div><div class="row wrap">${spoilersRevealed ? '' : `<button class="btn small" data-action="reveal-spoilers">Reveal Spoilers</button>`}<button class="btn small" data-view="juries">Open voting →</button></div></div>${spoilersRevealed ? (stats.length ? scoreboardHTML(s, 'combined', 5) : '<div class="empty">No participants added yet.</div>') : '<div class="empty">Current standings are hidden. Reveal spoilers to view the results.</div>'}</div></div>`;
+  root.innerHTML = `${allTimeRecordsHTML}<div class="grid3"><div class="metric"><div class="number">${s.participants.length}</div><div class="label">Participants</div></div><div class="metric"><div class="number">${s.juries.length}</div><div class="label">Jury Members</div></div><div class="metric"><div class="number">${allJuriesComplete(s) ? '✓' : s.juries.filter(j => juryComplete(j, s)).length + '/' + s.juries.length}</div><div class="label">Juries Completed</div></div></div><div class="panel"><div class="panel-head"><div><h2>Your WorldVision Shows</h2><div class="sub">Each show is stored separately on this device.</div></div><button class="btn primary" data-action="new-show">＋ New Show</button></div><div class="grid2">${cards}</div></div><div class="grid2"><div class="panel"><div class="panel-head"><div><h2>Show Checklist</h2><div class="sub">What still needs to be prepared for show night.</div></div><span class="pill ${s.participants.length >= 2 ? 'ok' : 'warn'}">${s.participants.length >= 2 ? 'Ready to go' : 'Setup needed'}</span></div><div class="stack"><div><div class="progressline"><span>Participants</span><b>${s.participants.length}</b></div><div class="statusbar"><span style="width:${Math.min(100, s.participants.length / 12 * 100)}%"></span></div></div><div><div class="progressline"><span>Jury votes</span><b>${s.juries.filter(j => juryComplete(j, s)).length}/${s.juries.length}</b></div><div class="statusbar"><span style="width:${s.juries.length ? 100 * s.juries.filter(j => juryComplete(j, s)).length / s.juries.length : 0}%"></span></div></div><div class="help">Suggested order: add participants → add juries → enter points → enter televote results → start the live show.</div></div></div><div class="panel"><div class="panel-head"><div><h2>Current Standings</h2><div class="sub">Only points entered so far are included.</div></div><div class="row wrap">${spoilersRevealed ? '' : `<button class="btn small" data-action="reveal-spoilers">Reveal Spoilers</button>`}<button class="btn small" data-view="juries">Open voting →</button></div></div>${spoilersRevealed ? (stats.length ? scoreboardHTML(s, 'combined', 5) : '<div class="empty">No participants added yet.</div>') : '<div class="empty">Current standings are hidden. Reveal spoilers to view the results.</div>'}</div></div>`;
 }
 
 function renderParticipants(s) {
@@ -2202,7 +2342,7 @@ function renderSettings(s) {
     <option value="fzero44" ${scoringPreset === 'fzero44' ? 'selected' : ''}>F-Zero GX + Extra: 44 values</option>
     <option value="custom" ${scoringPreset === 'custom' ? 'selected' : ''}>Custom scoring</option>
   </select>
-  <span class="smallmuted">Each point value can be awarded once per jury.</span></div><div class="field"><label for="customPointsInput">Custom point values</label><input class="input" id="customPointsInput" type="text" value="${escAttr(pointsList(s).join(', '))}" placeholder="12, 10, 8, 7, 6, 5, 4, 3, 2, 1" /><span class="smallmuted">Enter unique positive whole numbers, separated by commas or spaces. Applying a different scale asks before clearing existing jury assignments.</span><button class="btn" type="button" data-action="apply-custom-scoring">Apply custom scoring</button></div></div></div><div class="panel"><div class="panel-head"><div><h2>Music & Atmosphere</h2><div class="sub">Optional integrated music for the show.</div></div><span class="pill">Optional</span></div><div class="stack"><div class="row between"><div><b style="font-size:12px">Passende Musik je nach Jury-Runde abspielen</b><div class="sub">Wenn aktiviert, wird die Musik passend zum Ablauf der Show abgespielt. Wenn deaktiviert, wird während der gesamten Show keine Audiodatei wiedergegeben.</div></div><label class="switch"><input type="checkbox" data-setting="musicEnabled" ${s.settings.musicEnabled ? 'checked' : ''}><span></span></label></div><div class="help">Die Einstellung umfasst auch die Einstiegs-Musik, alle lokalen Soundeffekte und den Winning Run. Die globale Stummschaltung in der Präsentation bleibt eine zusätzliche Steuerung.</div></div></div><div class="panel"><div class="panel-head"><div><h2>Voting Rules</h2><div class="sub">Adjust the voting process to your preference.</div></div></div><div class="switchline"><span><b>Exclude own entry</b><br><span class="sub">A jury cannot award points to its own country.</span></span><label class="switch"><input type="checkbox" data-setting="excludeSelf" ${s.settings.excludeSelf ? 'checked' : ''}><span></span></label></div><div class="switchline"><span><b>Use televoting</b><br><span class="sub">Audience points are included in the final ranking.</span></span><label class="switch"><input type="checkbox" data-setting="televoteEnabled" ${s.settings.televoteEnabled ? 'checked' : ''}><span></span></label></div><div class="help" style="margin-top:14px">Export saves all show data, participants, juries and scores as JSON. Import can add existing shows or restore an edition.</div></div><div class="panel"><div class="panel-head"><div><h2>Backup & Data</h2><div class="sub">Your data belongs to you and stays in your browser.</div></div></div><div class="stack"><div class="row between"><div><b style="font-size:12px">Export show backup</b><div class="sub">Download a JSON file containing all show data.</div></div><button class="btn" data-action="export">⇩ Export</button></div><div class="row between"><div><b style="font-size:12px">Import show backup</b><div class="sub">Restore shows from a JSON file.</div></div><button class="btn" data-action="import-trigger">⇧ Import</button></div><div class="row between"><div><b style="font-size:12px">Reset current show</b><div class="sub">Remove participants, juries and scores.</div></div><button class="btn danger" data-action="reset-show">Reset</button></div></div></div></div>`;
+  <span class="smallmuted">Each point value can be awarded once per jury.</span></div><div class="field"><label for="customPointsInput">Custom point values</label><input class="input" id="customPointsInput" type="text" value="${escAttr(pointsList(s).join(', '))}" placeholder="12, 10, 8, 7, 6, 5, 4, 3, 2, 1" /><span class="smallmuted">Enter unique positive whole numbers, separated by commas or spaces. Applying a different scale asks before clearing existing jury assignments.</span><button class="btn" type="button" data-action="apply-custom-scoring">Apply custom scoring</button></div></div></div><div class="panel"><div class="panel-head"><div><h2>Music & Atmosphere</h2><div class="sub">Optional integrated music for the show.</div></div><span class="pill">Optional</span></div><div class="stack"><div class="row between"><div><b style="font-size:12px">Passende Musik je nach Jury-Runde abspielen</b><div class="sub">Wenn aktiviert, wird die Musik passend zum Ablauf der Show abgespielt. Wenn deaktiviert, wird während der gesamten Show keine Audiodatei wiedergegeben.</div></div><label class="switch"><input type="checkbox" data-setting="musicEnabled" ${s.settings.musicEnabled ? 'checked' : ''}><span></span></label></div><div class="help">Die Einstellung umfasst auch die Einstiegs-Musik, alle lokalen Soundeffekte und den Winning Run. Die globale Stummschaltung in der Präsentation bleibt eine zusätzliche Steuerung.</div></div></div><div class="panel"><div class="panel-head"><div><h2>Voting Rules</h2><div class="sub">Adjust the voting process to your preference.</div></div></div><div class="switchline"><span><b>Exclude own entry</b><br><span class="sub">A jury cannot award points to its own country.</span></span><label class="switch"><input type="checkbox" data-setting="excludeSelf" ${s.settings.excludeSelf ? 'checked' : ''}><span></span></label></div><div class="switchline"><span><b>Use televoting</b><br><span class="sub">Audience points are included in the final ranking.</span></span><label class="switch"><input type="checkbox" data-setting="televoteEnabled" ${s.settings.televoteEnabled ? 'checked' : ''}><span></span></label></div><div class="help" style="margin-top:14px">Export saves all shows, scores and All-Time High Scores as JSON. Import can add shows and merge the saved record data.</div></div><div class="panel"><div class="panel-head"><div><h2>Backup & Data</h2><div class="sub">Your data belongs to you and stays in your browser.</div></div></div><div class="stack"><div class="row between"><div><b style="font-size:12px">Export show backup</b><div class="sub">Download a JSON file containing all show data.</div></div><button class="btn" data-action="export">⇩ Export</button></div><div class="row between"><div><b style="font-size:12px">Import show backup</b><div class="sub">Restore shows from a JSON file.</div></div><button class="btn" data-action="import-trigger">⇧ Import</button></div><div class="row between"><div><b style="font-size:12px">Reset current show</b><div class="sub">Remove participants, juries and scores.</div></div><button class="btn danger" data-action="reset-show">Reset</button></div></div></div></div>`;
 }
 
 function scoreboardHTML(s, mode = 'combined', limit = Infinity) {
@@ -2260,7 +2400,7 @@ async function deleteMusicAsset(showId) {
 
 function exportShow() {
   db.shows.forEach(show => (show.participants || []).forEach(p => p.flag = toISOCode(p.flag)));
-  const payload = { app: 'WorldVision Studio', version: 2, exportedAt: new Date().toISOString(), activeShowId: db.activeShowId, shows: db.shows };
+  const payload = { app: 'WorldVision Studio', version: 3, exportedAt: new Date().toISOString(), activeShowId: db.activeShowId, shows: db.shows, allTimeRecords: db.allTimeRecords || {}, recordHistory: db.recordHistory || [] };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -2292,6 +2432,25 @@ function importData(file) {
           j.votes = j.votes || {};
         });
         return n;
+      });
+      db.allTimeRecords = db.allTimeRecords || {};
+      db.recordHistory = Array.isArray(db.recordHistory) ? db.recordHistory : [];
+      const importedRecords = x.allTimeRecords && typeof x.allTimeRecords === 'object' && !Array.isArray(x.allTimeRecords)
+        ? x.allTimeRecords
+        : {};
+      Object.entries(importedRecords).forEach(([key, record]) => {
+        if (!record || !Number.isFinite(Number(record.score))) return;
+        const current = db.allTimeRecords[key];
+        if (!current || Number(record.score) > Number(current.score)) {
+          db.allTimeRecords[key] = clone(record);
+        }
+      });
+      const knownHistoryIds = new Set(db.recordHistory.map(record => record?.id).filter(Boolean));
+      (Array.isArray(x.recordHistory) ? x.recordHistory : []).forEach(record => {
+        if (record && record.id && !knownHistoryIds.has(record.id)) {
+          db.recordHistory.push(clone(record));
+          knownHistoryIds.add(record.id);
+        }
       });
       db.shows.push(...normalized);
       db.activeShowId = normalized[0].id;
@@ -2354,6 +2513,10 @@ function startPresentation() {
     selectedHostId: null,
     hostRevealReady: false,
     debugFastForward: false,
+    recordRunId: uid(),
+    recordProcessed: false,
+    newAllTimeRecord: false,
+    newRecordSoundQueued: false,
     sprintMaxPoints
   };
   presIndex = 0;
@@ -2690,6 +2853,12 @@ function renderPres(phase = 'reveal') {
         const winnerScore = Number.isFinite(ev.winnerScore) ? ev.winnerScore : standings(s, 'combined')[0]?.score || 0;
         highlight = `${winnerScore} ${winnerScore === 1 ? 'POINT' : 'POINTS'}`;
         sub = winnerNames.length > 1 ? 'A shared first place. Congratulations!' : 'Congratulations!';
+        const newRecord = evaluateAllTimeRecord(s, pres.recordRunId);
+        if (newRecord) {
+          pres.newAllTimeRecord = true;
+          // sub += ' NEW ALL-TIME RECORD!';
+          toast(`NEW ALL-TIME RECORD! ${newRecord.holderNames}: ${Number(newRecord.score).toLocaleString()} points.`);
+        }
         scoreTitle = `Final Results with ${s.participants.length} participants`;
         break;
       }
@@ -3605,6 +3774,26 @@ function handleAction(a, id) {
       break;
     case 'import-trigger':
       document.getElementById('importFile').click();
+      break;
+    case 'delete-all-time-category': {
+      const record = db.allTimeRecords?.[id];
+      if (!record) return;
+      const categoryName = `${record.scoringSystemLabel || 'Custom scoring'} · Televote ${record.televoteEnabled ? 'enabled' : 'disabled'}`;
+      if (!confirm(`Delete the All-Time High Score category “${categoryName}” and all of its history entries? This cannot be undone.`)) return;
+      delete db.allTimeRecords[id];
+      db.recordHistory = (db.recordHistory || []).filter(entry => entry.categoryKey !== id);
+      saveDB();
+      render();
+      toast('Record category and its history were deleted.');
+      break;
+    }
+    case 'delete-all-time-records':
+      if (!confirm('Are you sure you want to delete all saved high scores and the complete record history? This action cannot be undone. Your shows, participants, juries and votes will not be affected.')) return;
+      db.allTimeRecords = {};
+      db.recordHistory = [];
+      saveDB();
+      render();
+      toast('All saved high scores and record history were deleted.');
       break;
     case 'reset-show':
       if (confirm('Completely reset this show?')) {

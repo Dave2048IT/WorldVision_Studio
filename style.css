@@ -1859,3 +1859,107 @@ tr:hover td {
   position: relative;
   z-index: 2;
 }
+
+
+/* v4.3 – All-Time High Scores */
+.all-time-records-panel {
+  margin-bottom: 22px;
+}
+.all-time-record-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+.all-time-record-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line, rgba(255,255,255,.12));
+  border-radius: 14px;
+  background: var(--surface-2, rgba(255,255,255,.035));
+}
+.all-time-televote-label {
+  margin-top: 6px;
+}
+.all-time-delete-button {
+  flex-shrink: 0;
+}
+.all-time-record-score {
+  margin-top: 16px;
+  font-size: clamp(30px, 4vw, 42px);
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums;
+}
+.all-time-holders {
+  display: grid;
+  gap: 7px;
+  margin-top: 13px;
+}
+.all-time-holder {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: 13px;
+}
+.all-time-holder b {
+  overflow-wrap: anywhere;
+}
+.all-time-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+  color: var(--muted, #9aa3b2);
+  font-size: 11px;
+}
+.all-time-record-edition {
+  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.all-time-empty {
+  padding: 24px 12px;
+}
+.all-time-history {
+  margin-top: 16px;
+  border-top: 1px solid var(--line, rgba(255,255,255,.12));
+  padding-top: 13px;
+}
+.all-time-history summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+.all-time-history-list {
+  display: grid;
+  gap: 0;
+  margin-top: 10px;
+}
+.all-time-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line, rgba(255,255,255,.08));
+  font-size: 12px;
+}
+.all-time-history-date {
+  flex: 0 0 auto;
+  color: var(--muted, #9aa3b2);
+  font-size: 11px;
+}
+@media (max-width: 600px) {
+  .all-time-history-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+}
